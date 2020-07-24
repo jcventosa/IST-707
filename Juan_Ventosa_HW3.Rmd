@@ -1,0 +1,338 @@
+---
+title: 'HW3: Association Rule Mining'
+author: "Juan Ventosa"
+date: "7/23/2020"
+output: word_document
+always_allow_html: true
+---
+
+Introduction:
+
+The marketing department of a financial firm keeps records on customers, including demographic information and the number of account types. When launching a new product, such as a "Personal Equity Plan" (PEP), a direct mail piece advertising the product is sent to existing customers, and a record is kept as to whether that customer responded and bought the product. Based on this store of prior experience, the managers decide to use data mining techniques to build customer profile models.
+
+Personal Equity Plans were designed to encourage individuals of ages 18+ to invest in shares of companies with qualifying unit trusts or investment trusts.  A minimum investment was required depending on the plan and on the manager's requirments. The plan is presented as an alternative to a savings account incentivized by a higher rate of interest. Investment risk was higher with susceptible to market fluctuations, but the personal equity plan also offered tax free investment for as long as the funds remained in untouched.
+
+Managers were tasked to better market the plans in order to gain a greater rate of purchase and increase the market return on investment. Identifying customers with a higher propensity to buy became a key goal to success. Can the demographiic and account type information already collected about their customers provide insight into achieving this goal? Are there identifiable customer characteristics that can be associated with a propensity to buy? The answers to these questions are some of the insights the managers are hoping to gain through the use of data mining and analysis. 
+
+Analysis and Models:
+
+About the Data
+
+Loading Data
+The bankdata_csv_all.csv file was provided by the marketing department to support the analysis.
+```{r data loading, echo=TRUE}
+bankdata <- read.csv("https://raw.githubusercontent.com/jcventosa/IST-707/master/bankdata_csv_all.csv")
+```
+
+Data Structure
+```{r structure, echo=TRUE}
+str(bankdata)
+```
+The data has 600 objects with the following 12 variables:
+
+Variable      Description                                           Data Type
+id  	        a unique identification number	                      Integer
+age	          Age of customer	                                      Numeric
+sex	          Male or Female	                                      Nominal
+region	      Inner_city/rural/suburban/town	                      Nominal
+income	      Income of the Customer	                              Numeric
+married	      Yes/No	                                              Binary Nominal
+children	    Number of children (0,1,2,3)	                        Integer
+car	          Does the customer own a car (Yes/No)	                Binary Nominal
+save_acct	    Does the customer have a saving account (Yes/No)	    Binary Nominal
+current_acct	Does the customer have a current account (Yes/No)	    Binary Nominal
+mortgage	    Does the customer have a mortgage (Yes/No)	          Binary Nominal
+pep	          Did customer buy a PEP after last mailing? (Yes/No)	  Binary Nominal
+
+Each record provides a description of the customers and whether they purchased a Personal Equity Plan as indicated by the pep field. The id variable has no relevance to pep and will be excluded from the analysis.
+
+Data Cleaning
+```{r data inspection, echo=TRUE}
+sum(is.na(bankdata))
+nrow(bankdata[duplicated(bankdata),])
+```
+The banking data is clean with complete sets, no missing values and no duplicate records.
+
+Exploratory Data Analysis
+
+Data Summary
+```{r summary, echo=TRUE}
+summary(bankdata)
+#Standard Deviation of age
+sd(bankdata$age) 
+# Standard Deviation of income
+sd(bankdata$income)
+# Distribution by number of children
+summary(factor(bankdata$children))
+```
+
+Initial inspection of the bankdata summary provides the proportional split for each binary nominal variable as follows:
+
+sex           0.50 Female   0.50 Male
+married       0.66 Yes      0.34 No
+car           0.51 Yes      0.49 No
+sav_acct      0.69 Yes      0.31 No
+current acct  0.76 Yes      0.24 No
+mortgage      0.35 Yes      0.65 No
+pep           0.54 Yes      0.46 No
+
+The number of children of the customers range from 0 to 3 with the following distribution: 
+
+0 children  0.438
+1 child     0.225
+2 children  0.224
+3 children  0.113
+
+The number of customers by region are distributed as follows:
+
+INNER_CITY  0.448
+RURAL       0.160
+SUBURBAN    0.104
+town        0.288
+
+The customers' ages range from 18 to 67 with a median age of 42 and a standard deviation of 14.42. There are fewer customers in the youngest and oldest age bins with a fairly even distribution for ages in between. The histogram does appear to have a normal distribution with a low peak and a wide standard deviation.
+
+```{r echo=TRUE}
+hist(bankdata$age,15)
+```
+The customers' incomes range from 5014 to 63130 with a median of 24925 and a standard deviation of 12899.47. The mean income of 27524 is greater than the median indicating a right skewed distribution with a decreasing number of customers as incomes increase.
+
+```{r echo=TRUE}
+hist(bankdata$income)
+```
+
+Adding age bins and income bins as additional variables to bankdata for further exploratory data analysis
+
+```{r binning age and income, echo=TRUE}
+# Binning ages to create categorical age variables
+bankdata$agebins <- cut(bankdata$age, breaks = c(17,24,34,44,54,64,Inf),
+                    labels = c("Adults 18-24", "Adults 25-34","Adults 35-44",
+                             "Adults 45-54", "Adults 55-64", "Adults 65+"))
+
+# Bining income to create categorical income variables
+bankdata$incomebins <- cut(bankdata$income, breaks =   
+                        c(0,14999,29999,44999,59999,Inf),
+                      labels = c("< $15000", "$15000-$29999","$30000-$44999",
+                             "$45000-$59999", "$60000+"))
+
+# Spot check to confirm interger values were correctly assigned bin labels.
+head(bankdata[,c(2,13,5,14)],10)
+```
+
+The marketing department's main purpose for the emails was to generate purchases of the Personal Equity Plan (pep) products. The proportion of the pep product purchased to not purchased based on the characteristics of sex, marital status, age, income, region and children are displayed in the bar charts below.
+
+```{r pepsex, echo=TRUE}
+#install.packages("ggplot2")
+#install.packages("gridExtra")
+library(ggplot2)
+library(gridExtra)
+
+# pep Bar graph by sex 
+pepsex <-ggplot(bankdata, aes(x= sex, fill = pep )) + 
+  geom_bar(position = 'dodge') + ggtitle("Personal Equity Plans by Sex") +
+  labs(y="Customer Count", x="Sex", fill = "Personal Equity Plan")
+
+pepmar <-ggplot(bankdata, aes(x= married, fill = pep )) + 
+  geom_bar(position = 'dodge') + ggtitle("Personal Equity Plans by Marital Status") +
+  labs(y="Customer Count", x="Marital Status", fill = "Personal Equity Plan") +
+  scale_x_discrete(labels = c("Unmarried", "Married"))
+
+grid.arrange(pepsex,pepmar, nrow=2)
+```
+A larger proportion of males purchased the personal equity plan as compared to females. The emails were equally distributed by sex with 300 females and 300 males. In terms of marital status, unmarried customers appear more likely to purchase a Personal Equity Plan (PEP) among their peers.  However, there is a larger number of married customers who made the investment.
+
+```{r pepage, echo=TRUE}
+# pep bar graph by age
+pepage <-ggplot(bankdata, aes(x=agebins, fill = pep )) + 
+  geom_bar(position = 'dodge') + ggtitle("Personal Equity Plans by Age") +
+  labs(y="Customer Count", x="Age", fill = "Personal Equity Plan")
+pepage
+table(bankdata$pep,bankdata$agebins)
+```
+
+A majority of Adults 55+ purchased the Personal Equity Plan while a majority of Adults 18-54 did not. There was also an increasing proportion of purchasers as the customers' ages increase.  This was especially evident with a growing proportion of purchasers from Adults 18-24 (34.5%) to Adults 25-34 (38.0%) with Adults 35-44 and Adults 45-54 continuing the trend with approximately the same proportion of purchasers at 46.0% and 45.1% respectively. Among Adults 55+ the proportion of purchasers flips to the majority at 57.5%.   
+
+```{r pepinc, echo=TRUE}
+# pep bar graph by income
+pepinc <-ggplot(bankdata, aes(x=incomebins, fill = pep )) + 
+  geom_bar(position = 'dodge') + ggtitle("Personal Equity Plans by Income") +
+  labs(y="Customer Count", x="Income", fill = "Personal Equity Plan")
+pepinc
+table(bankdata$pep,bankdata$incomebins)
+```
+
+Although a minority of customers with incomes between 15,000-29,999 purchased a plan, they were still a major drive for the product making up 47% of all customers and 44% of all plan purchasers. The chart also demonstrates an income increase also increases the propensity to buy as inferred by a majority of customers with 30k+ incomes who purchased the plan. Initial observations suggest all customers with incomes > 15,000 should be considered strong prospects for a Personal Equity Plan.   
+
+```{r pepreg, echo=TRUE}
+# pep bar graph by region
+pepreg <-ggplot(bankdata, aes(x=region, fill = pep )) + 
+  geom_bar(position = 'dodge') + ggtitle("Personal Equity Plans by Region") +
+  labs(y="Customer Count", x="Region", fill="Personal Equity Plan")
+pepreg
+table(bankdata$pep, bankdata$region)
+```
+
+Towns and inner cities have the largest number of Personal Equity Plan purchasers at 194 collectively and constitutes 43.8% of the customers in those regions.  Although the rural and suburban regions only have 80 purchasers combined, they constitute 50.6% of the customers in their region. An inference that customers in the rural and suburban regions are slightly more likely to purchase can be made based on these observations.  This is especially true among suburban customers where 61.3% of its residents purchased a Personal Equity Plan.   
+
+```{r pepchi, echo=TRUE}
+# pep bar graph by children
+pepchi <-ggplot(bankdata, aes(x=factor(children), fill = pep )) + 
+  geom_bar(position = 'dodge') + ggtitle("Personal Equity Plans by Number of Children") +
+  labs(y="Customer Count", x="Number of Children", fill = "Personal Equity Plan")
+pepchi
+table(bankdata$pep, factor(bankdata$children))
+```
+
+Eighty-one percent of customers with a single child purchased a plan. By comparison only 19% of customers with 3 children bought a Personal Equity Paln infering large families are less likely to be interested. Although 263 customers have no children only 36% of them purchased a plan. The number of customers with 2 children is approximately the same as customers with one child at counts of 134 and 135 customers respectively. However, only 41% of customers with 2 children purchased a plan.  
+
+```{r pep by accountt, echo=TRUE}
+#install.packages("gridExtra")
+library(gridExtra)
+
+# pep by savings account
+pepsav <- ggplot(bankdata, aes(x=save_act, fill = pep)) +
+  geom_bar(position = 'dodge') + ggtitle("PEP by Savings Account") +
+  labs(x="Savings Account", y="Customer Count", fill = "Personal Equity Plan") +
+  scale_x_discrete(labels = c("Unowned", "Owned"))
+
+# pep by current account
+pepcur <- ggplot(bankdata, aes(x=current_act, fill = pep)) +
+  geom_bar(position = 'dodge') + ggtitle("PEP by Current Account") +
+  labs(x="Current Account", y="Customer Count", fill = "Personal Equity Plan") +
+    scale_x_discrete(labels = c("Unowned", "Owned"))
+
+# pep by mortgage 
+pepmort <- ggplot(bankdata, aes(x=mortgage, fill = pep)) +
+  geom_bar(position = 'dodge') + ggtitle("PEP by Mortgage") +
+  labs(x="Mortgage", y="Customer Count", fill = "Personal Equity Plan") +
+    scale_x_discrete(labels = c("Unowned", "Owned"))
+
+# pep by car owner
+pepcar <- ggplot(bankdata, aes(x=car, fill = pep)) +
+  geom_bar(position = 'dodge') + ggtitle("PEP by Car Owner") +
+  labs(x="Car Owner", y="Customer Count", fill = "Personal Equity Plan") +
+    scale_x_discrete(labels = c("Unowned", "Owned"))
+
+grid.arrange(pepsav,pepcur,pepmort,pepcar,nrow=2)
+```
+
+The remaining four charts above reflect the distribution of Personal Equity Plan (PEP) purchasers based on account types owned: savings or current account, mortgage and car. Account owners for either savings or current have nearly twice the number of purchasers than non-account owners. Non-mortgage and non-car owners have larger numbers of non-purchasers than their owner counterparts.  However, the number of PEP purchasers among car owners and non-owners are approximately the same.  The charts can be interpreted to favor savings and current account owners as good prospects for the product. Car owners and non-owners appear to be equally likely to purchase the plan while customers without a mortgage are more likely to buy.
+
+Model:  Association Rules Mining
+
+The Apriori algorithm, which requires a transaction or sparse dataset will be used to generate the association rules. To transform the bankdata into a transaction the following steps are required.
+    1) The id variable has no relevance and will be removed
+    2) All numerical or integer datatypes will need to be converted to nominal factors
+    3) The dataset will need to be transformed from a dataframe to a transaction.
+
+```{r transform, echo=TRUE, message=FALSE, warning=FALSE}
+#install.packages("arules")
+#install.packages("arulesViz")
+library(arules)
+library(arulesViz)
+
+# copy bankdata to banktrans
+banktrans <- bankdata
+# remove the variable columns of id, age and income from banktrans. 
+# Note: agebins and incomebins already exist as factors for age and income
+banktrans <- banktrans[,-c(1,2,5)]
+# convert the children data type from integer to factor
+banktrans$children <- factor(banktrans$children)
+# check the structure to determine number of expected rows and columns in transaction
+str(banktrans)  
+# 600 objects and 33 factor levels which should result in 600 transactions with 33 items
+# convert banktrans into a transaction
+banktrans <- as(banktrans,'transactions')
+# check banktrans
+banktrans
+```
+The Apriori algorithm can now be applied to the banktrans sparse dataset to generate association rules. Attempts at varying levels of the parameters' support, confidence and lift were made to generate 20 to 30 rules to discover customer profiles associated with Personal Equity Plan purchasers.
+        Support: provides the frequency an itemset occurs in a transaction
+        Confidence: indicates how often a rule has been found to be true
+        Lift: the ratio of observed support to expected support
+
+To determine the most frequent customer characteristics associated with a Personal Equity Plan purchase, all the apriori algorithms to follow were set to a right hand side (rhs) pairing with "pep=YES". The support, confidence and length of itemsets were then leveraged to find the best rules given threshold values. Rules with lift < 1 were excluded.
+
+In ruleset1, the goal was to find the top ten rules with the maximum itemset lengths that occurred at least 5% of the time (support = 0.05) and appeared together at least 85% of the time (confidence = 0.85). This was done by reducing the minimum itemset length until at least 10 rules that met the support and confidence thresholds were generated. Ruleset1 resulted in 11 rules with a length of 5 to an itemset. All 11 rules had lift values greater than 1.87. Customers who meet these rules should be considered among the most likely to purchase a plan.  Although these customers only make up 5% to 7.3% of the dataset, more than 85% of customers who fit these profiles bought a Personal Equity Plan.
+
+```{r apriori ruleset1, echo=TRUE}
+ruleset1<-apriori(data=banktrans, parameter=list(supp=0.05,conf = 0.85, minlen = 5), 
+               appearance = list(default="lhs",rhs="pep=YES"),
+               control = list(verbose=FALSE))
+ruleset1<-sort(ruleset1, decreasing=TRUE,by="support")
+inspect(ruleset1[1:11])
+```        
+
+In ruleset2, the itemset length was reduced to a minimum length of 4. The thresholds were increased to support = 0.06 and confidence = 0.92.  Ruleset2 resulted in 5 rules with 4 items to a set and lift values greater than 2.  Increased thresholds for support and confidence were made to eliminate duplications with the 11 rules above while increasing the strenght of the prospects.
+```{r apriori ruleset2, echo=TRUE}
+ruleset2 <- apriori(banktrans, parameter = list(supp = 0.06, conf = 0.92, minlen = 4 ),
+            appearance = list(default = "lhs", rhs = "pep=YES"),
+            control = list(verbose=FALSE))
+ruleset2 <- sort(ruleset2, decreasing = TRUE, by="support")
+inspect(ruleset2[1:5])
+```
+
+Ruleset3 does not accept itemsets larger than 3. Since these itemsets wiil have greater numbers, a more stringent support threshold of 0.08 was set with a confidence threshold of 0.80. Ruleset3 resulted in 8 rules with 3 items to a set and 1 rule with 2 items to a set.  All 9 rules had lifts greater than 1.77.
+```{r apriori ruleset3, echo=TRUE}
+ruleset3 <- apriori(banktrans, parameter = list(supp = 0.08, conf = 0.80, maxlen = 3 ),
+            appearance = list(default = "lhs", rhs = "pep=YES"),
+            control = list(verbose=TRUE))
+ruleset3 <- sort(ruleset3, decreasing = TRUE, by="support")
+inspect(ruleset3[1:9])
+```
+
+The final 25 rules offer the highest combination of confidence and support to identify a varying number of combined characteristics that are associated with customers who purchased a Personal Equity Plan. The interactive graph of the final 25 rules below offers filtering by rules or item and allows user to access key stats by hovering the mouse over a rule or bubble. The graphs bubble size is in proportion to the support count for the rules.
+
+```{r final25rules, echo=TRUE}
+#install.packages("arulesViz")
+library(arulesViz)
+final25rules <- c(ruleset1, ruleset2, ruleset3)
+#final25rules <- sort(final25rules, decreasing = TRUE, by="confidence")
+plot(final25rules,method="graph",engine = "htmlwidget" )
+```
+
+To provide additional interesting insights that may aid the marketing department in the customer prospecting process, 5 more rules were generated.
+
+The first 4 rules observed association rules where customers did not purchase a Personal Equity Plan. To determine the three most characteristics that occur together the apriori algorithm was given a maximum itemset length of 4 with thresholds of 0.05 for support and 0.80 for confidence. This generated 28 rules. Rules with the combination of "married=YES"" with "children=0" had the highest support or occurences with confidence levels above 0.8 and lifts above 1.  This combination of characteristics may likely be excluded from a mailing list since they are not likely to buy. It should also be noted that none of the final 25 rules above contain a single combination of these two characteristics. 
+
+```{r staddrule, echo=TRUE}
+addrule1 <- apriori(banktrans, parameter = list(supp = 0.05, conf = 0.80, maxlen=4 ),
+                    appearance = list(default = "lhs",rhs = "pep=NO"),
+                    control = list(verbose=FALSE))
+addrule1 <- sort(addrule1, decreasing = TRUE, by="support")
+inspect(addrule1[1:4])
+```
+
+Another interesting insight is to find the combination of customer characteristics that purchased a plan 100% of the time.  To determine these associations apriori algorithm was given a maximum itemset length of 4 (to minimize results with small counts) and thresholds of support=0.01 and confidence = 1.  The results were sorted by support in descending order.
+
+The results produced 59 rules. However, only 7 had occurred more than 3% of the time.  The most common characteristics among the top 7 were the combination of "children=1" and "Adults 45-54".  These itemsets did not make it into the final 25 rules since none met the threshold of support = 0.05. Barely missing the threshold with a support value of 0.0483, these two characteristics may still have some value for prospecting and have been added as the fifth interesting rule.  
+
+```{r echo=TRUE, confidence=1}
+addrule2 <- apriori(banktrans, parameter = list(supp = 0.01, conf = 1, maxlen=4 ),
+                    appearance = list(default = "lhs",rhs = "pep=YES"),
+                    control = list(verbose=FALSE))
+addrule2 <- sort(addrule2, decreasing = TRUE, by="support")
+inspect(addrule2[1:7])
+```
+
+Results:
+
+The Apriori algorithm uses an association rule mining model to find and measure the probability of commonly occuring events. The variables available in the bankdata provided 11 customer characteristics based on demographic (age, sex, income, children, married and region) and customers' account types (car, mortgage, savings account and current account).  The 12th variable of whether a customer purchased a Personal Equity Plan (Yes or No) provided the key action of measure to be applied to the association rules. With the goal of creating a more proficient prospecting process, association rules mining utilizing the Apriori algorithm was used to determine frequently and commonly combined customer characteristics who also purchased a Personal Equity Plan. Customers whose profiles have high occurrence and high instance are expected to have a higher propensity to purchase and therefore be better prospects.
+
+To achieve the goal of finding the top 20-30 combined characteristics or itemsets with a propensity to buy, parameter thresholds were defined. First at least two characteristics must be paired with a purchase of the Personal Equity Plan (pep=YES).  Second the itemsets must occur in the sample at least 5% of the time; defined as support = 0.05.  Third the instances of the itemsets must be at least 80%; defined as confidence = 0.80. Confidence can also be defined as the percent of times the items in an itemset appear together. Lastly the pairings should be positively correlated with the ratio of paired occurrences to the probability of the occurrences being greater than one; defined as lift > 1.  These thresholds were abided in order to reduce the possibility of itemsets occuring by chance.  The resulting itemsets generated by the Apriori algorithm are defined as rules.
+
+The aim of finding the most frequent and most common charateristics with the highest combination led to the top 11 rules. Setting the support at 0.05 and the confidence at 0.85, the minimum number of combined characteristics were reduced until rules that met the thresholds were generated. The algorithm found 11 rules applied with a minimum of 5 characteristics (4 and pep=Yes) and lifts greater than 1.87. Larger number of combined characteristics occur less frequently.  However, larger itemsets with high confidence and high lift are desirable due to a more identifiable prospect. 
+
+To find the next top 5, the minimum number of combined characteristics were reduced to 4 (3 and pep=YES) with a support of 0.06 and a confidence of 0.92.  The final 9 rules were generated with a maximum number of 3 characteristics (2 and pep=YES) with a 0.08 support and a 0.80 confidence.  All 14 rules had lifts above 1.77. Customers with profiles that met the resulting top 25 rules were considered among the best prospects. These customers made up 5% to 18% of the sample and made a Personal Equity Plan purchase at least 80% of the time. 
+
+In addition association rules were also applied to find customers who did not purchase a Personal Equity Plan (pep=NO). With parameters set to support =0.05, confidence = 0.80 and maximum items combined = 4 (3 and pep=NO), 28 rules were generated where itemsets containing "children=0" and "married=YES" prominently ranked highly with support.  The combination of these two characteristics may be used to exclude customers as  a prospect.  On the other side of the spectrum using the parameters to find customer profiles who always purchased a plan (pep=YES) with confidence = 1 and support =0.01 generated 59 rules where prominent itemsets with the highest support values contained "children=1" and "Adults 45-54." Although customers with these combined characteristics had support values < 0.05, they should not necessarily be automatically excluded as prospects. 
+
+Conclusion:
+
+The findings of this analysis defined 25 customer profiles who would be ideal prospects for the Personal Equity Plan. Although these customers make up less than 20% of the sample, they opted to purchase the plan at least 80% of the time.  Prospects who met these profiles were expected to make similar purchasing decisions.  Identifying these customers as strong prospects and marketing the Personal Equity Plan to them should result in a higher rate of purchase and an increase on marketing return on investment.
+
+There were two key characteristics that were frequently common among the 25 profiles: customers with a single child and customers with incomes in the 15,000 to 29,999 range. Customers with at least one of these characteristics were likely to be strong prospects. Additionally customers with a savings account or a current account were also likely to be strong prospects. Interestingly, although a majority of Adults 55+ and a majority of customers living in suburban regions purchased a plan, neither age nor region played a role in identifying the 25 customer profiles. It should be noted, however, that all Adults 45-54 with a single child purchased a plan but they only made up 4.8% of the sample; narrowly missing the minimum threshold of 5%. Such a close qualifier, it could be argued that the strength of the single child characteristic carried most of the weight. It also demonstrates how the defined thresholds may miss promising prospects that should not be easily excluded.
+
+In terms of excluding customers as prospects there was one combination of characteristics that stood out. Eighty percent of customers who are married with no children combined with another characteristic did not purchase a plan. This is not too surprising given that 63% of customers with no children and the majority of married customers did not purchase a plan.  Yet the combination of the two characteristics can be safely excluded from a marketing campaign as the prospects of a purchase are low. 
+
+In conclusion the 25 customer profiles found in the analysis should provide clear guidance to target the most profitable prospects. Consequently some care should be taken not to use these profiles as a means of exclusion. Although the 25 profiles are highly likely to buy, they only make up a small portion of all possible buyers. Casting a wider net to capture the best results will still be needed to achieve the marketing goals.
