@@ -1,0 +1,443 @@
+---
+title: 'HW4: CLUSTER ANALYSIS'
+author: "Juan Ventosa"
+date: "7/31/2020"
+output: word_document
+---
+
+Introduction: 
+
+The United States Federal Aviation Act of 1958 created the Federal Aviation Agency (FAA) responsible for the safety of civil aviation. Its duties included aviation safety regulations, air space and air traffic management, air navigation facilities, and other programs such as aircraft registration and record documents reflecting aircraft titles and their parts. The FAA has also been the primary agency involved in investigating airplane crashes to determine their causes and to make recommendations on preventive measures or new safety regulations if needed. Their findings have led to many changes in the aviation industry in order to promote aviation safety.  
+
+Although the FAA is known for their onsite investigations examining crash sites, damaged airplane parts and collecting data from black boxes that record all flight activity, analyzing the recordeded historical airplane crashes from all around world may also lead to new insights in trends and causes. Examining the aircrafts involved in crashes along with their operators, flight routes and the locations of their crash may reveal addressable concerns that require correction. In the past 100 years, thousands of plane crashes have been recorded. Delving into these records can be an overwhelming challenge to find relevant causes.  What are the differences and similarities between these recorded crashes?  Are there trends in the data that have not yet been discovered. How can meaningful information be extracted?  
+
+One method in data science is to apply cluster analysis techniques to segment the data into meaningful groups. By combining data points with distinct similarities into a cluster and differentiating them from from other clusters allows deeper exploration within a cluster or group. Segmenting the data into clusters in itself can provide a lot of information about a large dataset, but it also offers opportunities to simplify the exploration of trends and causes to similar events.
+
+This analysis will examine 100 years of plane crash records from 1908 to 2009 by applying cluster analysis techniques to segment the data into meaningful information that may lead to new insights into plane crash causes.  The results should help simplify and provide guidance on how to further investigate aircraft crash events that could lead to safer airflight.
+
+Analysis and Models:
+
+About the Data:
+
+Data Load:
+The "Airplane Crashes and Fatalities Since 1908" dataset was originally hosted by Open Data by Socrata. It is currently made available by a community member on Kaggle.com  as a csv file.
+```{r load, echo=TRUE, message=FALSE, warning=FALSE}
+# Load file from personal github repository
+AirCrash <- read.csv("https://raw.githubusercontent.com/jcventosa/IST-707/master/Airplane_Crashes_and_Fatalities_Since_1908.csv")
+```
+
+Data Structure:
+```{r structure, echo=TRUE, warning=FALSE}
+str(AirCrash)
+```
+The data has 5268 records with 13 variables
+
+Variable          Description                                           
+Date:             Date of accident                                      
+Time:             Local time, in 24 hr. in the format hh:mm             
+Location:         Location of the accident                            
+Operator:         Airline or operator of the aircraft                     
+Flight:           Flight number assigned by the aircraft operator
+Route:            Complete or partial route flown prior to the accident
+Type:             Aircraft type
+Registration:     ICAO registration of the aircraft
+cn/In:            Construction or serial number / Line or fuselage number
+Aboard:           Total people aboard
+Fatalities:       Total fatalities aboard
+Ground:           Total killed on the ground
+Summary:          Brief description of the accident and cause if known
+
+Each record represents an airplane crash event that occurred between Sept 17, 1908 through June 8, 2009. Every event was identified by the airline operator, flight, route, date and time along with the type of aircraft, number of people aboard, deaths and a brief description of the accident cause if known.
+
+Data Inspection and Cleaning:
+```{r inspection, echo=TRUE, warning=FALSE}
+nrow(AirCrash[duplicated(AirCrash),])
+sum(is.na(AirCrash))
+Missing_Values <- (sapply(AirCrash,function(x) sum(is.na(x))))
+t(data.frame(Missing_Values))
+```
+There are 56 missing cumulative values located in the Aboard, Fatalities and Ground variables.  NA values for Fatalities and Ground may suggest no deaths for those records.  However, it is unusual to encounter an airplane crash with no person aboard. 
+
+```{r aboard inspection, echo=TRUE, warning=FALSE}
+#install.packages("rapportools")
+library(rapportools)
+AirCrash[is.empty(AirCrash$Aboard),c(1,4,5,7,10)]
+```
+Upon further inspection of the Aboard variable, the 22 NA values were determined to be a mix of military and passenger planes. In addition 2 zero values for Aboard were recorded for military fighter planes.  The dates for these events span from years 1919 to 2000. These 24 records make up less than 0.5% of the data and will be excluded from the analysis.  The remaining NA values in Fatalities and Ground will be converted to zeros.
+
+```{r aboard}
+# exclude missing aboard
+library(rapportools)
+AirCrash <- AirCrash[c(!is.empty(AirCrash$Aboard)),]
+# replace remaining NA values in Fatalities and Ground with zeros
+AirCrash$Fatalities[is.na(AirCrash$Fatalities)] <- 0
+AirCrash$Ground[is.na(AirCrash$Ground)] <- 0
+dim(AirCrash)
+sum(is.na(AirCrash))
+```
+
+Format Date and Time variables from factors to datetime.
+```{r datetime, echo=TRUE, warning=FALSE}
+AirCrash$Date <- as.Date(AirCrash$Date, format = "%m/%d/%Y")
+AirCrash$Time <- as.POSIXct(AirCrash$Time, format = "%H:%M")
+# check if any format changes created NA values
+sum(is.na(AirCrash$Date))
+sum(is.na(AirCrash$Time))
+```
+Converting the Date and Time variables from factor to datetime resulted in 2209 NA values for Time. The Time variable will be excluded from analysis due to too many unknowns.  
+
+```{r datetime, echo=TRUE, warning=FALSE}
+# exclude Time Variable
+AirCrash <- AirCrash[,-2]
+```
+
+In addition the following variables will be added to dataset to provide additional insight.
+
+Survivors:       Total Aboard minus Fatalities Aboard
+SurvivalRate:    Ratio of Survivors to Total Aboard
+Year:            Extract a Year variable from Date as factor
+```{r survivors, echo=TRUE, message=FALSE, warning=FALSE}
+AirCrash$Survivors <- AirCrash$Aboard - AirCrash$Fatalities
+AirCrash$SurvivalRate <- AirCrash$Survivors/AirCrash$Aboard
+
+#install.packages(lubridate)
+library(lubridate)
+AirCrash$Year <- (year(AirCrash$Date))
+```
+
+Exploratory Data Analysis:
+
+Data Summary
+```{r summary, echo=TRUE, warning=FALSE}
+summary(AirCrash)
+```
+
+The summary data already provides some key information such as the following:
+
+Dates of crash events range from Sept 1908 to June 2009.
+Aeroflot and US Air Force have the highest number of crash events.
+4,177 Flight.. numbers are not listed.
+1,687 Routes are unknown.
+Douglas DC-3 has the largest number of crashes.
+Passengers aboard range from 1 to 644.
+Fatalities aboard range from 0 to 583.
+Ground deaths range from 0 to 2,750.
+Summary contains 383 unknown causes.
+Survivors ranged from 0 to 516.
+The mean survival rate is 16.51%
+
+```{r echo=TRUE, warning=FALSE}
+#install.packages("ggplot2")
+library(ggplot2)
+CrashesPerYear = ggplot(AirCrash, aes(x=Year)) + geom_bar (colour = "purple") + 
+  xlab("Year") + ylab("Airplane Crashes") + ggtitle("Airplane Crashes Per Year")
+CrashesPerYear
+```
+Airplane crashes increased between 1908 through the World War II years of the 1940's and peaking to over 100 crashes in 1972. The number of crashes have declined in the last decade of the chart with less than 25 crashes in the first 6 months of 2009.  
+
+```{r echo=TRUE, warning=FALSE}
+#install.packages("ggplot2")
+library(ggplot2)
+DeathsPerYear = ggplot(AirCrash, aes(x=Year, y=Fatalities)) +  
+    geom_col(colour = "red") + xlab("Year") + ylab("Airplane Crash Fatalities") + ggtitle("Airplane Crash Fatalities Per Year")
+DeathsPerYear
+```
+In the last 20 years (1988-2008) of the dataset, fatalities from airplane crashes declined at a faster rate than the rate of crashes. This suggest either a higher survival rate per crash or more frequent crashes by small passenger planes and less frquent crashes by large passenger planes.
+
+```{r echo=TRUE, warning=FALSE}
+#install.packages("ggplot2")
+library(ggplot2)
+AboardPerYear = ggplot(AirCrash, aes(x=Year, y=Aboard)) +  
+    geom_col(colour="blue") + 
+    xlab("Year") + ylab("People Aboard Crashed Planes") + ggtitle("People Aboard Crashed Planes Per Year")
+AboardPerYear
+```
+The number of people aboard planes that crashed declined steeply in the last 20 years of the data set. Based on the previous Crash and Fatality charts, this would infer more frequent crashes in smaller passenger planes.
+
+```{r echo=TRUE, warning=FALSE}
+AC <- cbind(Survivors = aggregate(AirCrash$Survivors,by=list(AirCrash$Year),FUN =sum),
+            Aboard = aggregate(AirCrash$Aboard,by=list(AirCrash$Year),FUN =sum))
+SurvivorsPerYear = ggplot(AC, aes(x=Survivors.Group.1, y=Survivors.x/Aboard.x)) +  
+    geom_col(colour = "dark green") + 
+    xlab("Year") + ylab("Survival Rate") + 
+    ggtitle("Survival Rate of Airplane Crashes Per Year")
+SurvivorsPerYear
+```
+
+The survival rate is a ratio of the number of survivors aboard to the total number aboard. The mean plane crash survival rate from 1908 to 2009 was 16.5%. The chart reflects an average survival rate by year. Plane crash survival rates steadily increased from the late 1960's to peak in the late 1990's. 
+
+The Summary variable, which describes the cause of crash, will play a role in describing the clusters produced on the airplane crash data. Unfortunately, the 383 empty, blank or "" values for the Summary variable will have no relevance in the clustering process.  These records will be excluded from the analysis.
+
+```{r}
+dim(AirCrash)
+nrow(AirCrash[AirCrash$Summary == "",])
+AirCrash <- AirCrash[!AirCrash$Summary == "",]
+dim(AirCrash)
+nrow(AirCrash[AirCrash$Summary == "",])
+```
+
+Models:
+
+In an attempt to create meaningful definitive groups or "crash categories", the kmeans partitional clustering analysis technique will be applied to find similarities between airplane crashes based on: the number of people aboard, fatalities, survivors and survival rates. Twenty year intervals will also be applied to the clustering analysis model in the event technical advances that took place over the years may have contributed to increasing or decreasing crash events. 
+
+To apply the partitional clustering techniques, the key variables of "Aboard", "Fatalities", "Survivors" and "Survival Rate" will be extracted to a new data set: AirClust.  In addition, binomial numeric variables identifying score years will be added to AirClust
+```{r pcluster prep, echo=TRUE, warning=FALSE}
+#install.packages("dplyr")
+library(dplyr)
+# Extract the key variables from AirCrash2 into a data frame AirClust.
+AirClust <- AirCrash2[,c(9,10,13,14)] 
+# Create binominal values by score years in AirScore
+AirScore <- data.frame(Year = AirCrash2$Year)
+AirScore$Y1908_Y1929 <- ifelse(AirScore$Year > 1929,0,1)
+AirScore$Y1930_Y1949 <- ifelse(between(AirScore$Year,1930,1949), 1,0 )
+AirScore$Y1950_Y1969 <- ifelse(between(AirScore$Year,1950,1969), 1,0 )
+AirScore$Y1970_Y1989 <- ifelse(between(AirScore$Year,1970,1989), 1,0 )
+AirScore$Y1990_Y2009 <- ifelse(AirScore$Year > 1989 ,1,0)
+# Bind AirScore binomial variables to AirClust
+AirClust2 <- data.frame(AirClust,AirScore[,-1])
+head(AirClust2)
+```
+
+An initial run of four different K means cluster sizes of 3, 4, 5, and 6 were made along with a visualization comparison.
+```{r pclusters}
+#install.packages("gridExtra")
+#install.packages("factoextra")
+library(gridExtra)
+library(factoextra)
+
+k1 <- kmeans(AirClust2, centers = 3, nstart = 25)
+k2 <- kmeans(AirClust2, centers = 4, nstart = 25)
+k3 <- kmeans(AirClust2, centers = 5, nstart = 25)
+k4 <- kmeans(AirClust2, centers = 6, nstart = 25)
+
+
+
+p1 <- fviz_cluster(k1, geom = "point", data = AirClust2) + ggtitle("K means k=3")
+p2 <- fviz_cluster(k2, geom = "point", data = AirClust2) + ggtitle("K means k=4")
+p3 <- fviz_cluster(k3, geom = "point", data = AirClust2) + ggtitle("K means k=5")
+p4 <- fviz_cluster(k4, geom = "point", data = AirClust2) + ggtitle("K means k=6")
+
+grid.arrange(p1,p2,p3,p4)
+```
+Visualizing the results, all four clusters provided distinctive groups with little overlap when depicted in a 2 dimensional space. The Elbow method using the total within sum of squares plotted against the number of cluster sizes will be applied to aid in determining the optimal number of clusters to use.
+
+```{r elbow, echo=TRUE, message=FALSE, warning=FALSE}
+#install.packages("tidyverse", "factoextra", "cluster", "gridExtra", "dplyr", "plyr")
+library(tidyverse)
+library(factoextra)
+library(cluster)
+library(gridExtra)
+library(dplyr)
+library(plyr)
+fviz_nbclust(AirClust2, kmeans, method = "wss")
+```
+The elbow "bend" in the line chart can subjectively be identified as 3 or 4. The 4 cluster groups will be used to segment the airplane crashes with the top 3 records shown below.
+
+```{r cluster results, echo=TRUE}
+# Applying the resulting 4 clusters to airplane crash variables.
+AirCrash2 <- data.frame(AirCrash2,Cluster = k2$cluster)
+head(AirCrash2,3)
+```
+
+Generate a data frame listing the mean values for people aboard, fatalities, survivors and survival rates by cluster groups.
+```{r}
+# Aggregating the mean values by Aboard, Fatalities, Survivors and Survival Rate.
+# Minimum and Maximum aggregations were also made for Aboard.
+AboardClust <- aggregate(AirCrash2$Aboard, by=list(Cluster = AirCrash2$Cluster),FUN = mean)
+AboardClustx <- aggregate(AirCrash2$Aboard, by=list(Cluster = AirCrash2$Cluster),FUN = max)
+AboardClustm <- aggregate(AirCrash2$Aboard, by=list(Cluster = AirCrash2$Cluster),FUN = min)
+DeathClust <- aggregate(AirCrash2$Fatalities, by=list(AirCrash2$Cluster), FUN = mean)
+SurviveClust <- aggregate(AirCrash2$Survivors, by = list(AirCrash2$Cluster), FUN = mean)
+SRateClust <- aggregate(AirCrash2$SurvivalRate, by = list(AirCrash2$Cluster), FUN = mean)
+
+# Binding the aggregated values into a data frame.
+PCluster <- data.frame(cbind(Cluster =AboardClust$Cluster,
+                             Plane_Crashes = k2$size,Max_Aboard = AboardClustx$x,
+                             Min_Aboard =AboardClustm$x, Mean_Aboard = AboardClust$x,
+                             Mean_Fatalities = DeathClust$x, Mean_Survivors = SurviveClust$x, 
+                             Mean_SurvivalRate = SRateClust$x))
+PCluster
+```
+Inspecting the mean values by Aboard, Fatalities, Survivors and Survival Rates, gives a nice depiction on the distinctive features of each cluster.  Essentially the clusters can be defined by the number of people aboard and their survival rates.
+
+Cluster 1 = ranged from 34 to 137 aboard and had a mean survival rate of approximately 20%
+Cluster 2 = ranged from 109 to 519 aboard and had a high mean survival rate of approximately 93%
+Cluster 3 = ranged from 107 to 644 aboard and had an extremely low mean survival rate of < 5%
+Cluster 4 = ranged from 1 to 46 aboard and had a low mean survival rate of approximately 15%
+
+Note: The distinction of a low or high mean survival rate was determined in relation to average survival rate of 16.5% for all crashes in the data set.
+
+The survival rates for Cluster 1 and 4 were close to the mean survival rate of 16.5%. Clusters 2 and 3 are larger passenger planes with a huge difference in mean survival rates. Unfortunately there were twice as many large passenger planes that had a low mean survivalr rate vs. a high mean survival rate.
+
+Moving forward these clusters will be referred to as follows:
+
+MidsizeCrash = Cluster 1
+LargeSaved = Cluster 2
+LargeDeadly = Cluster 3
+SmallCrash = Cluster 4
+
+```{r}
+# Adding the Cluster nanmes of MidSizeCrash, Large Saved, LargeDeadly and Small Crashs as ClustID
+AirCrash2$ClustID <- ifelse(AirCrash2$Cluster == 1, "MidsizeCrash", 
+                    ifelse(AirCrash2$Cluster == 2, "LargeSaved",
+                    ifelse(AirCrash2$Cluster == 3, "LargeDeadly", "SmallCrash")))
+head(AirCrash2$ClustID)
+tail(AirCrash2$ClustID)
+```
+
+
+```{r}
+library(ggplot2)
+library(gridExtra)
+
+# Generate charts to compare the plane crashes per year by cluster
+
+K4CrashPerYear <- ggplot(AirCrash2, aes(x=Year, y=Cluster, fill = Cluster)) + geom_col () + 
+  xlab("Year") + ylab("Plane Crashes") + ggtitle("Plane Crashes Per Year by Cluster") + 
+  theme(plot.title = element_text(size = 12)) + scale_fill_viridis_c()
+#K4CrashPerYear
+
+K4AboardPerYear <- ggplot(AirCrash2, aes(x=Year, y=Aboard, fill = Cluster)) + geom_col () + 
+  xlab("Year") + ylab("Aboard Plane Crash") + ggtitle("Aboard Plane Per Year by Cluster") + 
+  theme(plot.title = element_text(size = 12)) + scale_fill_viridis_c()
+#K4AboardPerYear
+
+K4DeathsPerYear <- ggplot(AirCrash2, aes(x=Year, y=Fatalities, fill = Cluster)) + geom_col () + 
+  xlab("Year") + ylab("Plane Crash Fatalities") + ggtitle("Plane Crash Deaths Per Year by Cluster") + 
+  theme(plot.title = element_text(size = 12)) + scale_fill_viridis_c()
+#K4DeathsPerYear
+
+K4SurvivePerYear <- ggplot(AirCrash2, aes(x=Year, y=Survivors, fill = Cluster)) + geom_col () + 
+  xlab("Year") + ylab("Plane Crash Survivors") + ggtitle("Crash Survivors Per Year by Cluster") + 
+  theme(plot.title = element_text(size = 12)) + scale_fill_viridis_c()
+#K4SurvivePerYear
+
+grid.arrange(K4CrashPerYear, K4AboardPerYear, K4DeathsPerYear, K4SurvivePerYear)
+```
+
+Examining the cluster distribution by year, small plane crashes as seen in yellow for cluster 4 (SmallCrash) were the most frequent type of crashes throughout the century (see top left chart).  The number of people aboard planes that crashed began to rise from the 1960's to 2009 as indicated by light blue and light green colors of the large passenger planes in cluster 2 and 3 respectively (see top right chart). Plane crash deaths from the 1960's to 2009 largely decreased year to year despite an increase in large plane deaths as indicated by the dominant light green color of cluster 3 (LargeDeadly) in the bottom left chart.  On the otherhand, the number of crash survivors also increased from the 1950's to 2009 with large planes dominating the survival rates in the later years; shown in light blue for cluster 2 (LargeSaved) as seen in the lower right chart.
+
+The two interesting clusters are the LargeSaved and LargeDeadly airplane crash categories.  Both groups have relatively few crashes making up only 1.8% (LargeSaved) and 3.3% (LargeDeadly) of all the crashes in the cluster analysis. Additional comparisons between these two clusters may shed some light on crash causes and their deaths.
+
+```{r}
+library(gridExtra)
+library(ggplot2)
+library(dplyr)
+LDTrend <- ggplot(LargeDeadly,aes(x=Year, y=Fatalities)) + geom_bar(stat='identity',fill="red") +                  xlab("Year") + ylab("Fatalities") + ggtitle("LargeDeadly Fatalities by Year")
+#LDTrend
+
+LSTrend <- ggplot(LargeSaved,aes(x=Year, y=Fatalities)) + geom_bar(stat='identity',fill="dark red") +                  xlab("Year") + ylab("Fatalities") + ggtitle("LargeSaved Fatalities by Year")
+#LSTrend
+
+grid.arrange(LDTrend, LSTrend)
+```
+The difference in the frequency and number of fatalities between LargeDeadly and LargeSaved are starkly shown above. LargeSaved not only had fewer crashes, the fatalities were significantly smaller with no more than 200 deaths in a crash vs. over 1500 deaths on a crash for Large Deadly.  On the positivie side, fatalities for these clusters of large passenger planes appear to be trending down from the 1990's to 2010.
+
+
+```{r}
+# Creating a dataframe for each of the two clusters
+LargeDeadly <- AirCrash2[AirCrash2$Cluster == 3,]
+LargeSaved <- AirCrash2[AirCrash2$Cluster == 2,]
+
+library(gridExtra)
+library(dplyr)
+library(ggplot2)
+
+# Chart top 5 Operators by Survivor and Cluster
+LDSurvivors <- ggplot(top_n(LargeDeadly,n=5,Survivors),aes(x=reorder(Operator,Survivors), y=Survivors)) + geom_bar(stat='identity',fill="blue") + coord_flip () + xlab("AirCraft Model") + 
+  ylab("Cumulative Survivors") + ggtitle("Top 5 LargeDeadly Survivors by Plane Model")
+
+
+LSSurvivors <- ggplot(top_n(LargeSaved,n=5,Survivors),aes(x=reorder(Operator,Survivors), y=Survivors)) + geom_bar(stat='identity',fill="dark green") + coord_flip () + xlab("AirCraft Model") + 
+  ylab("Cumulative Survivors") + ggtitle("Top 5 LargeSaved Survivors by Plane Model")
+
+grid.arrange(LDSurvivors, LSSurvivors)
+
+```
+The top 5 crashes with the highest number of survivors by operator shows very different results for the two large passenger plane clusters.
+
+```{r}
+library(gridExtra)
+library(ggplot2)
+library(dplyr)
+LDDeaths <- ggplot(top_n(LargeDeadly,n=5,Fatalities),aes(x=reorder(Type,Fatalities), y=Fatalities)) + geom_bar(stat='identity',fill="blue") + coord_flip () + xlab("AirCraft Model") + 
+  ylab("Fatalities") + ggtitle("Top 5 LargeDeadly Fatalities by Plane Model")
+#LDDeaths
+
+LSDeaths <- ggplot(top_n(LargeSaved,n=5,Fatalities),aes(x=reorder(Type,Fatalities), y=Fatalities)) + geom_bar(stat='identity',fill="dark green") + coord_flip () + xlab("AirCraft Model") + 
+  ylab("Fatalities") + ggtitle("Top 5 LargeSaved Fatalities by Plane Model")
+#LSDeaths
+
+grid.arrange(LDDeaths, LSDeaths)
+```
+Among the top 5 crashes with the highest number of fatalities by AirCraft Model, similarities do appear between the two large plane clusters with DC-10 and Boeing-747 models topping the list for both. 
+
+To determine if different descriptions applied to largely fatal large passenger crashes vs. largely survivable large passenger crashes, the Summary section of the dataset may provide insight to key words common to each cluster.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+#install.packages("RColorBrewer")
+#install.packages("wordcloud")
+#install.packages("SnowballC")
+#install.packages(RColorBrewer)
+library(SnowballC)
+library(wordcloud)
+library(tm)
+library(RColorBrewer)
+
+# Create word vectors by record for each cluster
+corpusLD <-Corpus(VectorSource(AirCrash2[AirCrash2$Cluster == 3,12]))
+corpusLS <-Corpus(VectorSource(AirCrash2[AirCrash2$Cluster == 2,12]))
+
+# Create Term Document Matrix for each corpus
+
+LargeDeadlyTDM <- TermDocumentMatrix(corpusLD,control = list(stopwords = TRUE,
+              removePunctuation=TRUE,tolower = TRUE,removeNumbers=TRUE))
+# Remove sparse terms from LargeDeadlyTDM
+LargeDeadlyTDM <- removeSparseTerms(LargeDeadlyTDM, 0.99)
+
+LargeSavedTDM <- TermDocumentMatrix(corpusLS,control = list(stopwords = TRUE,
+              removePunctuation=TRUE,tolower = TRUE,removeNumbers=TRUE))
+# Remove sparse terms from LargeSavedTDM
+LargeSavedTDM <- removeSparseTerms(LargeSavedTDM, 0.99)
+
+ld <- as.matrix(LargeDeadlyTDM)
+ldv <-sort(rowSums(ld),decreasing = TRUE)
+dfld<- data.frame(word=names(ldv),freq=ldv)
+LargeDeadlyWC <- wordcloud(words = dfld$word,freq = dfld$freq,min.freq = 1,
+                       max.words = 100, colors = brewer.pal(6,"Dark2"))
+```
+LargeDeadly WordCloud Cluster
+```{r}
+ls <- as.matrix(LargeSavedTDM)
+lsv <-sort(rowSums(ls),decreasing = TRUE)
+dfls<- data.frame(word=names(lsv),freq=lsv)
+LargeSavedWC <- wordcloud(words = dfls$word,freq = dfls$freq,min.freq = 1,
+                       max.words = 100, colors = brewer.pal(6,"Dark2"))
+```
+LargeSaved WorldCloud Cluster
+
+What was immediately apparent when comparing the worldclouds of LargeDeadly to LargeSaved were the similarities in words such as "aircraft", "plane", "crew", "airport", etc.. However, the difference in frequency of some words (made apparent by the font size of the words) revealed interesting insights.  For instance the word "crashed" is mentioned less frequently in LargeSaved while appearing prominently large in LargeDeadly.  The word "runway" was the most frequent word in the LargeSaved cluster inferring the importance of a runway presssence for a survival crash. From the word similarities an inference can be made that there are many common crash causes between the two cluster groups. The disimilarities on the otherhand may give more insight.  For instance the words "struck", "mountain", "stall", "collision" and "exploded" are only seen in the wordcloud for LargeDeadly.  While the words "fog", "goaround" and "hijacked" are only seen in the wordcloud for LargeSaved.  
+
+Results:
+
+The K means algorithm is unsupervised model that uses a partitional clustering technique to find similarities among records in a dataset based on numerical or continuous data types.  Nominal data can also be used in the model if it is possible to transform the data to an binomial or ordinal data type. For this analysis the numerical attributes describing the number of people aboard a plane, the number of fatalities, the number of survivors and the survival rates were used in the model.  In addition, a period of 20 year intervals created by binning the years into scores and converting each score to a binomial attribute with 1 indicating a crash event and 0 indicating no crash event for each record was also entered into the model. 
+
+As an unsupervised model the K means algorithm provides the advantage of exploring and segmenting large data with minimal instruction and minimal domain knowledge to determine parameters.  The challenge becomes choosing the appropriate parameters to include in the analysis and determining the number of clusters to generate. In regards to the plane crash data, the parameters were easily identified since the objective was to find clusters that would provide insight on the survivability of crashes. The challenge of choosing the optimal number of clusters was ultimately determined through the utilization of the Elbow method.  Through trials, a collection of K means results at different cluster sizes are compared by their total within sum of squares.  The within sum of squares (wss) is defined as the total distance of data points from their respective cluster centroid.  The total within sum of squares is simply the sum of wss for all clusters in the cluster group. The Elbow method charts the line of the total wss by number of clusters. The cluster size at which the line "bends" or levels off is defined as the "elbow" and a probable optimal size for the cluster.  For the plane crash dataset the elbow could be identified as 3 or 4.  Four was chosen on an admittedly subjective observation of the bend. 
+
+Once the number of clusters and parameters are determined the K means model can be applied to the data. The resulting clusters can then be used to segment the data into distinctive groups. It should be noted that the results do not always provide defining differences.  However, the resulting 4 clusters for the plane crash data successfully created distinctive groups with the following descriptions.
+
+Small plane crashes ranging from 1-46 aboard and a mean survival rate of 15%.
+Midsize plane crashes ranging from 34-137 aboard and a mean survival rate of 20%
+Large plane crashes ranging from 107-644 aboard and a mean survival rate of < 5%
+Large plane crashes ranging from 109-519 aboard and a mean survival rate of 93%
+
+Conclusion:
+
+The 100 years of data used for this analysis provided a historical picture of plane crash events covering the few number of crashes in 1908 to the peak of over a hundred crashes in 1972 when commercial airlines became a common means of long distance travel. It also depicts the increased number of crashes during World War II along with a declining number of crashes in the first decade of the new millenium.  The data also captured the record ground deaths caused by plane crashes occuring on September 11, 2001 with approximately 2750 deaths. The rich amount of information in the dataset may also provide clues to the causes of the crashes.  By categorizing the data into meaningful groups a picture of which type of crashes had higher survival rates became more apparent and can be used to identify plane models, operators, flight routes, and passenger sizes that may be susceptible to less survivable crashes.
+
+The findings of this analysis identified four distinct types of plane crashes from the 100 years of plane crash data.  The four types of plane crashes can be defined as: crashes involving small planes with less than 50 passengers and a high fatality rate, crashes involving midsize planes with less than 140 passengers and a high fatality rate, crashes involving large planes with more than 100 passengers and a high fatality rate and lastly crashes involving large planes with more than 100 passengers and a low fatality rate. 
+
+Identifying these cluster groups and exploring their characteristics revealed numerous insights about crash events. For instance the majority of airplane crashes throughout the century occurred on small planes with less than 50 passengers. The clusters also revealed that the increasing number of survivors in the past 30 years is due to an increased survival rate on large passenger planes. The data can also be used to identify the top aircraft models with the highest crash fatalities or the top commercial airlines with the highest survival rates. Using the clusters' event descriptions to form wordclouds also provided insight to the probable causes and the importance of certain factors to be present or absent during a survivable or deadly crash.
+
+In conclusion the resulting 4 clusters defined in this analysis provided some initial insights to the chraracteristics of a survivable or deadly flight. Once identified these clusters can be used to examine the key similarities between the crash events that occurred within a cluster group.  These similarities may reveal new insights to cause or prevention. Although much more analysis delving into how these clusters differ is needed, the process of thoroughly examining these clusters may lead to many discoveries to other aspects of aviation. Cluster analysis can at times provide direct answers to immediate problems, but more often the technique may lead to providing guidance on how to examine large datasets to reveal its secrets.
+
