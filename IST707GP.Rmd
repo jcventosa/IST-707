@@ -1,0 +1,398 @@
+---
+title: "IST707GP"
+author: "Fu, Maloney, Tran, Ventosa"
+date: "7/26/2020"
+output:
+  word_document: default
+---
+
+Introduction:
+
+Auto insurance is mandated in most states to provide drivers and automobile owners financial protection in the event of an accident. Laws vary from state to state and insurance coverages are designed to meet state laws while also providing customized policies to meet individual needs.  Insurance policies are generally issued for six-month to one-year timeframes. When nearing a policy's expiration, insurance companies send renewal offers to retain customers and collect premiums. As a highly competitive industry customer churn rate averages at approximately 22% every year (https://bit.ly/3fgvVXv) making customer retention one of the most important factors for success. 
+
+FMTV Auto Insurance maintains and updates its customer records in order to discover new and effective ways to retain its clientele. The company provides both personal and company auto insurance and attempts to offer customized insurance renewals to best meet their clients' varying needs. As part of its marketing efforts to retain clients, FMTV sends out one of four renewal offers to customers nearing the end of their policy terms. A purchase or non-purchase response to the offers are recorded to determine the marketing return on investment. Recently purchase response rates to their renewal offers have been down. The marketing department questions whether a more effective method of distributing renewal offers may increase purchases and reduce customer churn. 
+
+Customer Lifetime Value (CLV) is one ot the key metrics FMTV uses to measure its success. CLV is a measures of a customer's total worth to a business over the entire time period of the customer-business relationship. By developing strategies to reduce client churn, policy term businesses can increase the overall CLV of its clients.  Higher retention also leads to lower costs and better profit margins as retaining existing customers costs less than acquiring new ones. However, FMTV has kept track of its clients' CLV not only as a measure of success but to also develop predictive models to identify potentially high CLV customers to acquire or maintain.
+
+The simplest formula for measuring CLV is:
+
+Customer revenue per year 
+multiplied by 
+Duration of the relationship in years 
+minus 
+Total costs of acquiring and serving the customer 
+equals to 
+CLV
+
+Analysis and Models:
+
+About the Data:
+
+Loading Data
+```{r}
+auto <-read.csv("https://raw.githubusercontent.com/jcventosa/IST-707/master/WA_Fn-UseC_-Marketing-Customer-Value-Analysis.csv")
+```
+
+Data Structure
+```{r structure}
+str(auto)
+```
+The data has 9134 records with the following 24 variables:
+
+Variables                       Description
+Customer:                       Customer ID number
+State:                          State of residence or business
+Customer Lifetime Value:        Customer's total worth to business over life of the relationship
+Response:                       Yes or No response to a renewal offer
+Coverage:                       Type of policy (Basic, Extended, Premium)
+Education:                      Level of education (High School or less, College, BA, MA , PHD)
+Effective To Date:              Date the policy expires
+Employment Status:              (Employed, Unemployed, Retired, Disabled, Medical Leave)
+Gender:                         Male or Female
+Income:                         Customers' annual income
+Location Code:                  (Rural, Suburban, Urban)
+Marital Status:                 (Single, Married, Divorced)
+Monthly Premium Auto            Amount of customers' monthly insurance payments
+Months Since Last Claim         Number of months between customers' last reported insurance claim
+Months Since Policy Inception   Number of months since customer began an insurance policy
+Number of Open Complaints       Number of unresolved customer complaints
+Number of Policies              Number of policies customer currently owns
+Policy Type                     (Corporate Auto, Personal Auto, Special Auto)
+Policy                          3 levels (L1, L2, L3) per Policy Type (Corporate, Personal, Special)
+Renew Offer Type                4 types of renewal offers (Offer 1, Offer 2, Offer 3, Offer 4)
+Sales Channel                   Channels to purchase a policy (Agent, Branch, Call Center, Web)
+Total Claim Amount              Cummulative amount of claims since policy inception
+Vehicle Class                   Type of vehicle (4-Door, Luxury, Luxury SUV, Sports Car, SUV, 2-Door)
+Vehicle Size                    (Large, Medium, Small)
+
+Data Cleaning:
+
+Check for NA, missing and duplicated data
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+#install.packages("rapportools")
+library(rapportools)
+sum(is.na(auto))
+nrow(auto[duplicated(auto),])
+```
+No missing or duplicated data.
+
+Check data summary for unusual distributions or incorrect data types
+```{r summary, echo=TRUE, message=FALSE, warning=FALSE}
+summary(auto)
+```
+Initial inspection of the dataset summary provides the proportional split for some key nominal variables as follows:
+
+Response:         0.14 Yes        0.86  No
+Gender:           0.51 Female     0.49  Male
+Marital Status    0.58 Married    0.15  Divorced    0.27 Single
+Location Code     0.19 Rural      0.63  Suburban    0.17 Urban
+Coverage          0.61 Basic      0.30  Extended    0.09 Premium
+Policy Type       0.74 Personal   0.04  Special     0.22 Corporate
+Vehicle Size      0.10 Large      0.70  Medsize     0.19 Small
+
+Data Transformation:
+
+Converting the Effective.To.Date variable's data type from factor to date.  
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+auto$Effective.To.Date <- as.Date(auto$Effective.To.Date, format = "%m/%d/%y")
+```
+
+In addition the following discretized variables will be added to the dataset.
+
+CLV_Bins        Discretized Customer.Lifetime.Value 
+IncomeBin       Discretized Income
+MoPremiumBin    Discretized Monthly.Premium
+ClaimBin        Discretized Total.Claim
+
+```{r Discretization, echo=TRUE, message=FALSE, warning=FALSE}
+# Adding columns for CLV, Income, Monthly Premium and Total Claim bins.
+
+# Cutomer Lifetime Value bins
+auto$CLV_Bins <- cut(auto$Customer.Lifetime.Value, 
+                       breaks = c(0,1999,3999,5999,7999,9999,Inf),
+                       labels = c("< $2000", "$2000-$3999","$4000-$5999",
+                                  "$6000-$7999", "$8000-$9999", "$10000+"))
+# Income bins
+auto$IncomeBin <- cut(auto$Income, breaks = c(0,14999,29999,44999,59999,74999,Inf),
+                    labels = c("< $15000", "$15000-$29999","$30000-$44999",
+                               "$45000-$59999", "$60000-$74999", "$75000+"))
+# Monthly Premium bins
+auto$MoPremiumBin <- cut(auto$Monthly.Premium.Auto, 
+                            breaks = c(0,74,99,124,149,Inf),
+                            labels = c("< $75", "$75-$99","$100-$124","$125-$149","$150+"))
+
+# Total Claim bins
+auto$ClaimBin <- cut(auto$Total.Claim.Amount, 
+                        breaks = c(0,249,499,749,999,Inf),
+                        labels = c("< $250", "$250-$499","$500-$749","$750-$999","$1000+"))
+
+# Spot check bin labels match appropriate values
+head(auto[,c(3,25,10,26,13,27,22,28)],30)
+
+# Replace NA in IncomeBin with "< $15000"
+auto$IncomeBin[is.na(auto$IncomeBin)] <- "< $15000"
+sum(is.na(auto$IncomeBin))
+head(auto[,c(10,26)],15)
+```
+
+```{r include=FALSE}
+# Write the cleaned data to a csv file named auto.csv
+write.csv("~/Desktop/auto.csv")
+```
+Exploratory Data Analysis:
+
+Client demographic background by Policy Type
+```{r}
+#install.packages("ggplot2", "RColorBrewer", "gridExtra"")
+library(ggplot2)
+library(RColorBrewer)
+library(gridExtra)
+
+PTGender <- ggplot(auto, aes(x= Policy.Type, fill=Gender)) + geom_bar(stat = "count") + 
+  xlab("Policy Type") + ylab("Policy Count") + ggtitle("Policy Type by Gender") +
+  scale_fill_brewer (palette = "Set1", labels = c("Female", "Male"))
+
+PTMarital <- ggplot(auto, aes(x=Policy.Type, fill = Marital.Status)) + geom_bar(stat = "count") +
+    xlab("Policy Type") + ylab("Policy Count") + ggtitle("Policy Type by Marital Status") +
+  scale_fill_brewer (palette = "Dark2", name = "Marital Status") 
+
+table(auto$Policy.Type, auto$Gender)
+table(auto$Policy.Type, auto$Marital.Status)
+grid.arrange(PTGender, PTMarital)
+```
+There is an approximate 50/50 split by Gender for both Corporate and Personal policy types with females just sligthly outnumbering men by a percent or less.  Women make up 55% of the Special auto policy types. The distribution of policy types by marital status is within +/- 4% of the overall distribution of 15% Divorced, 58% Married and 27% Single.
+
+```{r}
+PTState <- ggplot(auto, aes(x=Policy.Type, fill = State)) + geom_bar(stat = "count") +
+    xlab("Policy Type") + ylab("Policy Count") + ggtitle("Policy Type by State") +
+  scale_fill_brewer (palette = "Accent", name = "State") 
+
+PTLocation <- ggplot(auto, aes(x=Policy.Type, fill = Location.Code)) + geom_bar(stat = "count") +
+    xlab("Policy Type") + ylab("Policy Count") + ggtitle("Policy Type by Region") +
+  scale_fill_brewer (palette = "Dark2", name = "Region") 
+
+table(auto$Policy.Type, auto$State)
+table(auto$Policy.Type, auto$Location.Code)
+grid.arrange(PTState, PTLocation) 
+```
+The majority of all three policy types are in California followed by Oregon, Arizona, Nevada and Washington. Suburban regions have over three times the number of Corporate and Personal policy types compared to Rural and Urban regions. Sixty-0ne percent of Special policy types are also located in Surban regions with Rural and Urban each making up approximately 14%-15%.  
+
+```{r}
+PTEmployment <- ggplot(auto, aes(x=Policy.Type, fill = EmploymentStatus)) + geom_bar(stat = "count") +
+    xlab("Policy Type") + ylab("Policy Count") + ggtitle("Policy Type by Employment Status") +
+  scale_fill_brewer (palette = "Paired", name = "Employment Status")
+
+PTIncomeBin <- ggplot(auto, aes(x=Policy.Type, fill = IncomeBin)) + geom_bar(stat = "count") +
+    xlab("Policy Type") + ylab("Policy Count") + ggtitle("Policy Type by Income") +
+  scale_fill_brewer (palette = "Accent", name = "Income") 
+
+PTEducation <- ggplot(auto, aes(x=Policy.Type, fill = Education)) + geom_bar(stat = "count") +
+    xlab("Policy Type") + ylab("Policy Count") + ggtitle("Policy Type by Education Level") +
+  scale_fill_brewer (palette = "Accent", name = "Education") 
+
+table(auto$Policy.Type, auto$Education)
+table(auto$Policy.Type, auto$EmploymentStatus)
+table(auto$Policy.Type, auto$IncomeBin)
+PTEducation
+PTEmployment
+PTIncomeBin
+```
+There is nearly an equal distribution of clients with High School or Less, College and Bachelors where each education level makes up approximately 30% of each policy type.  The synchronicity in Employed and Unemployed is also true making up approximately 62% and 25% of each policy type respectively. Lastly 44%-45% all three policy types have incomes less than $30000.
+
+Exploring Renewal Offers
+
+```{r}
+table(auto$Renew.Offer.Type, auto$Policy.Type)
+
+ggplot(auto, aes(x=Renew.Offer.Type, fill = Policy.Type)) + geom_bar(stat="count")+
+  xlab("Renewal Offer Type") + ylab("Policy Count") + ggtitle("Renewal Offer Type by Policy Type") +
+  scale_fill_brewer(palette = "YlOrBr")
+```
+Each client from the three policy types received a single renewal offer type of 1, 2, 3 or 4 and each policy type received approximately   Offer 1 was distributed to approximately 41% of each policy which were distributed approximately 41%, 32%, 25% and 12% of prespectively, 
+
+```{r}
+ggplot(auto, aes(x=Total.Claim.Amount, y=Customer.Lifetime.Value)) + 
+  geom_point(aes(col=Renew.Offer.Type, shape = Response, size = Response)) +
+  scale_color_brewer(palette="Dark2")
+```
+
+```{r}
+hist(auto$Customer.Lifetime.Value)
+summary(auto$Customer.Lifetime.Value)
+sd(auto$Customer.Lifetime.Value)
+```
+Customer Lifetime Values (CLV) at FMTV Insurance ranges from 1,898 to 83,325 with a median of 5,780 and a standard deviation of 6,871. The mean CLV of 8,005 is greater than the median indicating a right skewed distribution with a decreasing number of customers as CLV increases. 
+
+```{r}
+library(RColorBrewer)
+library(ggplot2)
+CLV_PolicyType <- ggplot(auto, aes(x=Policy.Type, y=Customer.Lifetime.Value, fill = Policy ))+
+        geom_col() + xlab("Policy Type") + ylab("Customer Lifetime Value") +
+        ggtitle("Customer Lifetime Value by Policy Type and Policy") +
+         scale_fill_brewer(palette = "Set1")
+CLV_PolicyType
+```
+Customers who purchase Personal Auto insurance provide the lion's share of customer lifetime value to FMTV insurance.
+
+```{r}
+#install.packages("RColorBrewer")
+library(RColorBrewer)
+CLV_Vehicle <- ggplot(auto, aes(x=Vehicle.Size, y=Customer.Lifetime.Value, 
+              fill = Vehicle.Class ))+geom_col() + 
+        xlab("Vehicle Type") + ylab("Customer Lifetime Value") + 
+        ggtitle("Customer Lifetime Value by Vehicle Type and Vehicle Class") +
+        scale_fill_brewer(palette = "Dark2")
+        
+CLV_Vehicle
+```
+Customers with Midsize vehicles offer the highest customer lifetime values with Four-Door and SUV models
+
+```{r}
+#install.packages("RColorBrewer")
+library(RColorBrewer)
+CLV_Region <- ggplot(auto, aes(x=State, y=Customer.Lifetime.Value, 
+              fill = Location.Code ))+geom_col() + 
+        xlab("State") + ylab("Customer Lifetime Value") +
+        ggtitle("Customer Lifetime Value by State and Region") +
+        scale_fill_brewer(palette = "Set1")
+        
+CLV_Region
+```
+California and Oregon are the states with the highest Customer Lifetime Value (CLV) customers. Suburban areas have higher CLV customers than other location codes.
+
+```{r}
+library(ggplot2)
+ggplot(auto, aes(x=State, y=Customer.Lifetime.Value, fill = Response)) + geom_col()
+```
+
+```{r}
+library(RColorBrewer)
+library(ggplot2)
+ggplot(auto, aes(x=Renew.Offer.Type, y=Customer.Lifetime.Value, fill = Response)) + geom_col() +
+       xlab("Renewal Offer Type") + ylab("Customer Lifetime Value") +
+      ggtitle("Customer Lifetime Value by Renewal Offer and Response") +
+      scale_fill_brewer(palette = "Set1")
+```
+
+**State Distribution**
+```{r}
+state.distribution <- table(auto$State)
+dfstate.distribution <- as.data.frame(state.distribution)
+colnames(dfstate.distribution) <- c("State", "Number of Customer")
+dfstate.distribution
+plot.SD <- plot(dfstate.distribution, main = "State Distributions")
+
+
+```
+
+**CLV and State Distribution**
+```{r}
+CLV.statedf <- data.frame(auto$State, auto$Customer.Lifetime.Value)
+CLV.state <- tapply(CLV.statedf$auto.Customer.Lifetime.Value, CLV.statedf$auto.State, sum)
+CLV.state
+plot.CLV.state <- barplot(CLV.state, main = "CLV vs. State Distribution")
+plot.CLV.state
+```
+
+**CLV mean by state**
+```{r}
+CLV.stateMean <- tapply(CLV.statedf$auto.Customer.Lifetime.Value, CLV.statedf$auto.State, mean)
+CLV.stateMean
+plot.CLV.stateMean <- barplot(CLV.state, main = "CLV Mean By State")
+plot.CLV.stateMean
+```
+
+**CLV and Education Distribution**
+```{r}
+CLV.educationdf <- data.frame(auto$Customer.Lifetime.Value, auto$Education)
+CLV.education <- tapply(CLV.educationdf$auto.Customer.Lifetime.Value, CLV.educationdf$auto.Education, sum)
+CLV.education
+plot.CLV.education <- barplot(CLV.education, main = "CLV vs. Education Distribution")
+plot.CLV.education
+```
+
+**CLV mean by education**
+```{r}
+CLV.educationMean <- tapply(CLV.educationdf$auto.Customer.Lifetime.Value, CLV.educationdf$auto.Education, mean)
+CLV.educationMean
+plot.CLV.educationMean <- barplot(CLV.educationMean, main = "CLV vs. Education Distribution")
+plot.CLV.educationMean
+```
+
+**CLV and Gender**
+```{r}
+CLV.genderdf <- data.frame(auto$Customer.Lifetime.Value, auto$Gender)
+CLV.gender <- tapply(CLV.genderdf$auto.Customer.Lifetime.Value, CLV.genderdf$auto.Gender, mean)
+CLV.gender
+plot.CLV.gender <- barplot(CLV.gender, main = "Average CLV Distribution For Gender")
+plot.CLV.gender
+```
+
+**CLV and Incomebin**
+```{r}
+CLV.IBdf <- data.frame(auto$Customer.Lifetime.Value, auto$IncomeBin)
+CLV.IB <- tapply(CLV.IBdf$auto.Customer.Lifetime.Value, CLV.IBdf$auto.IncomeBin, mean)
+CLV.IB
+plot.CLV.IB <- barplot(CLV.IB, main = "Average CLV Distribution in Each Incomebin")
+plot.CLV.IB
+```
+
+## Discover the correlations between variables
+```{r}
+premium.CLV <- ggplot(data=auto, aes(x=Customer.Lifetime.Value, y=Monthly.Premium.Auto)) +geom_point()
+premium.CLV <- premium.CLV + ggtitle("Potential Correlation Between CLV and Monthly Premium Auto")
+premium.CLV 
+# The positive correlation is observed. 
+```
+
+**Potential Correlation Between CLV and Number Of Open Complaints**
+```{r}
+complaints.CLV <- ggplot(data=auto, aes(x=Customer.Lifetime.Value, y=Number.of.Open.Complaints)) +geom_point()
+complaints.CLV <- complaints.CLV + ggtitle("Potential Correlation Between CLV and Number Of Open Complaints")
+complaints.CLV
+# More complaints tend to receive lower CLV
+```
+
+**Total complaints**
+```{r}
+totalClaim.CLV <-  ggplot(data=auto, aes(x=Customer.Lifetime.Value, y=Total.Claim.Amount)) +geom_point()
+totalClaim.CLV <- totalClaim.CLV + ggtitle("Potential Correlation Between CLV and Total Complaints")
+totalClaim.CLV
+ggplot(data=auto, aes(x=Customer.Lifetime.Value, y=Total.Claim.Amount)) +geom_point()
+```
+
+**Coverage VS CLV**
+```{r}
+coverage.CLV <- ggplot(data = auto, aes(x = Customer.Lifetime.Value, y = Coverage)) + geom_point()
+coverage.CLV <- coverage.CLV + ggtitle("Potential Correlation Between CLV and Coverage")
+coverage.CLV
+# Interestinly, the coverage does not affect much about CLV
+```
+
+**Employment VS CLV**
+```{r}
+employeement.CLV <- ggplot(data = auto, aes(x = Customer.Lifetime.Value, y = EmploymentStatus)) + geom_point()
+employeement.CLV <- employeement.CLV + ggtitle("Potential Correlation Between CLV and Employement Status")
+employeement.CLV
+```
+i
+**Sales Channel vs CLV**
+```{r}
+SalesChannel.CLV <- ggplot(data = auto, aes(x = Customer.Lifetime.Value, y = Sales.Channel)) + geom_point()
+SalesChannel.CLV <- SalesChannel.CLV + ggtitle("Potential Correlation Between CLV and Sales Channel")
+SalesChannel.CLV
+```
+
+**Vechicle vs CLV**
+```{r}
+vehicleClass.CLV <- ggplot(data = auto, aes(x = Customer.Lifetime.Value, y = Vehicle.Class)) + geom_point()
+vehicleClass.CLV <- vehicleClass.CLV + ggtitle("Potential Correlation Between CLV and Vehicle Class")
+vehicleClass.CLV
+```
+
+**Vehicle Size vs CLV**
+```{r}
+Vehicle.Size.CLV <- ggplot(data = auto, aes(x = Customer.Lifetime.Value, y = Vehicle.Size)) + geom_point()
+Vehicle.Size.CLV <- Vehicle.Size.CLV + ggtitle("Potential Correlation Between CLV and Vehicle Size")
+Vehicle.Size.CLV
+```
