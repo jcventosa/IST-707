@@ -1,0 +1,387 @@
+---
+title: 'HW5: DECISION TREE'
+author: "Juan Ventosa"
+date: "8/11/2020"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+Introduction: 
+
+The United States Federal Aviation Act of 1958 created the Federal Aviation Agency (FAA) responsible for the safety of civil aviation. Its duties included aviation safety regulations, air space and air traffic management, air navigation facilities, and other programs such as aircraft registration and record documents reflecting aircraft titles and their parts. The FAA has also been the primary agency involved in investigating airplane crashes to determine their causes and to make recommendations on preventive measures or new safety regulations if needed. Although the FAA is known for onsite crash investigations, analyzing the recordeded historical airplane crashes from all around world may also lead to new insights in trends and causes. 
+
+In a previous analysis, k means clustering techniques were applied to 100 years of recorded plane crashes to segment the over 4 thousand crash events into meaningful groups. By combining data points with distinct similarities into a cluster and differentiating them from one another, the analysis identified 4 key clusters: 1) small plane crashes with less than 48 aboard and a mean survival rate of 15%  2) midsize plane crashes with 35-137 aboard and a mean survival rate of 20% 3) large plane crashes with 115-517 aboard and a mean survival rate of 93% and 4) large plane crashes with 108-644 aboard and a mean survival rate of less than 5%. Delving into the characteristics of each cluster revealed some key trends that occurred over the years and some key differences between the clusters such as airline operators involved and key words used to described the events.  There were also some similarities among clusters such as the plane models involved in these events.
+
+To further explore and validate the data, a decision tree model was applied to predict the cluster groups. Using a classification model to pedict the clusters can shed light on the weights of the relevant variables used to reach the ultimate outcomes and provide guidance on how the algorithm arrived at its decision. The classification model's predictions can also be measured on how well it accurately predicted the cluster. In the same vein, the characteristics of the classification results can be compared to the cluster results to identify simalarities and differences that may also lead to insights on whether the classification model can allow a better understanding on how to define each cluster group.
+
+Analysis and Models:
+ 
+About the Data:
+
+Data Load:
+The AirCrash2 data set is the cleaned and transformed data set made in the previous analysis. AirCrash2 includes "Airplane Crashes and Fatalities Since 1908" plus the cluster identifiers to which each record belongs. Moving forward AirCrash2 will be used to create a Decision Tree model. Note: The original dataset was originally hosted by Open Data by Socrata. It is currently made available by a community member on Kaggle.com as a csv file.
+```{r load, echo=TRUE, message=FALSE, warning=FALSE}
+# Load file from personal github repository
+AirCrash2 <- read.csv("https://raw.githubusercontent.com/jcventosa/IST-707/master/AirCrash2.csv")
+```
+
+Exploratory Data Analysis:
+
+Data Summary
+```{r summary, echo=TRUE, warning=FALSE}
+summary(AirCrash2)
+```
+
+The summary data already provides some key information such as the following:
+
+Dates of crash events range from Sept 1908 to June 2009.
+Aeroflot and US Air Force have the highest number of crash events.
+3,800 Flight.. numbers are not listed.
+1,334 Routes are unknown.
+Douglas DC-3 has the largest number of crashes.
+Passengers aboard range from 1 to 644.
+Fatalities aboard range from 0 to 583.
+Ground deaths range from 0 to 2,750.
+Survivors ranged from 0 to 516.
+The mean survival rate is 17.12%
+
+Generate a data frame listing the mean values for people aboard, fatalities, survivors and survival rates by cluster groups.
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# Aggregating the mean values by Aboard, Fatalities, Survivors and Survival Rate.
+# Minimum and Maximum aggregations were also made for Aboard.
+AboardClust <- aggregate(AirCrash2$Aboard, by=list(Cluster = AirCrash2$Cluster),FUN = mean)
+AboardClustx <- aggregate(AirCrash2$Aboard, by=list(Cluster = AirCrash2$Cluster),FUN = max)
+AboardClustm <- aggregate(AirCrash2$Aboard, by=list(Cluster = AirCrash2$Cluster),FUN = min)
+DeathClust <- aggregate(AirCrash2$Fatalities, by=list(AirCrash2$Cluster), FUN = mean)
+SurviveClust <- aggregate(AirCrash2$Survivors, by = list(AirCrash2$Cluster), FUN = mean)
+SRateClust <- aggregate(AirCrash2$SurvivalRate, by = list(AirCrash2$Cluster), FUN = mean)
+PlaneClust <- data.frame(table(AirCrash2$Cluster))
+
+# Binding the aggregated values into a data frame.
+PCluster <- data.frame(cbind(Cluster =AboardClust$Cluster,
+                             Plane_Crashes = PlaneClust$x,Min_Aboard =AboardClustm$x,
+                             Max_Aboard = AboardClustx$x, Mean_Aboard = AboardClust$x,
+                             Mean_Fatalities = DeathClust$x, Mean_Survivors = SurviveClust$x, 
+                             Mean_SurvivalRate = SRateClust$x))
+PCluster
+```
+Inspecting the mean values by Aboard, Fatalities, Survivors and Survival Rates, gives a nice depiction on the distinctive features of each cluster.  Essentially the clusters can be defined by the number of people aboard and their survival rates.
+
+Cluster 1 = ranged from 108 to 644 aboard and had an extremely low mean survival rate of < 5% 
+Cluster 2 = ranged from 112 to 517 aboard and had a high mean survival rate of approximately 93%  
+Cluster 3 = ranged from 35 to 137 aboard and had a mean survival rate of approximately 20% 
+Cluster 4 = ranged from 1 to 47 aboard and had a low mean survival rate of approximately 15%
+
+Note: The distinction of a low or high mean survival rate was determined in relation to average survival rate of 17.12% for all crashes in the data set.
+
+The survival rates for Cluster 3 and 4 were close to the mean survival rate of 17.12%. Clusters 1 and 2 are larger passenger planes with a huge difference in mean survival rates. Unfortunately there were twice as many large passenger planes that had a low mean survivalr rate vs. a high mean survival rate.
+
+Moving forward these clusters will be referred to as follows:
+
+SamllCrash = Cluster 4
+LargeDeadly = Cluster 1
+LargeSaved = Cluster 2
+MidsizeCrash = Cluster 3
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# Adding the Cluster nanmes of MidSizeCrash, Large Saved, LargeDeadly and Small Crashs as ClustID
+AirCrash2$ClustID <- ifelse(AirCrash2$Cluster == 4, "SmallCrash", 
+                    ifelse(AirCrash2$Cluster == 1, "LargeDeadly",
+                    ifelse(AirCrash2$Cluster == 2, "LargeSaved", "MidsizeCrash")))
+head(AirCrash2$ClustID)
+tail(AirCrash2$ClustID)
+```
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(gridExtra)
+
+# Generate charts to compare the plane crashes per year by cluster
+
+K4CrashPerYear <- ggplot(AirCrash2, aes(x=Year, y=Cluster, fill = Cluster)) + geom_col () + 
+  xlab("Year") + ylab("Plane Crashes") + ggtitle("Plane Crashes Per Year by Cluster") + 
+  theme(plot.title = element_text(size = 12)) + scale_fill_viridis_c()
+#K4CrashPerYear
+
+K4AboardPerYear <- ggplot(AirCrash2, aes(x=Year, y=Aboard, fill = Cluster)) + geom_col () + 
+  xlab("Year") + ylab("Aboard Plane Crash") + ggtitle("Aboard Plane Per Year by Cluster") + 
+  theme(plot.title = element_text(size = 12)) + scale_fill_viridis_c()
+#K4AboardPerYear
+
+K4DeathsPerYear <- ggplot(AirCrash2, aes(x=Year, y=Fatalities, fill = Cluster)) + geom_col () + 
+  xlab("Year") + ylab("Plane Crash Fatalities") + ggtitle("Plane Crash Deaths Per Year by Cluster") + 
+  theme(plot.title = element_text(size = 12)) + scale_fill_viridis_c()
+#K4DeathsPerYear
+
+K4SurvivePerYear <- ggplot(AirCrash2, aes(x=Year, y=Survivors, fill = Cluster)) + geom_col () + 
+  xlab("Year") + ylab("Plane Crash Survivors") + ggtitle("Crash Survivors Per Year by Cluster") + 
+  theme(plot.title = element_text(size = 12)) + scale_fill_viridis_c()
+#K4SurvivePerYear
+
+grid.arrange(K4CrashPerYear, K4AboardPerYear, K4DeathsPerYear, K4SurvivePerYear)
+```
+
+Examining the cluster distribution by year, small plane crashes as seen in yellow for cluster 4 (SmallCrash) were the most frequent type of crashes throughout the century (see top left chart).  The number of people aboard planes crashes began to rise from the 1960's to 2009 as indicated by light blue and dark blue colors of the large passenger planes in cluster 1 and 2 respectively (see top right chart). Plane crash deaths from the 1960's to 2009 largely decreased year to year despite an increase in deadly large plane crashes as indicated by the dominant dark blue color of cluster 1 (LargeDeadly) in the bottom left chart.  On the otherhand, the number of crash survivors also increased from the 1950's to 2009 with large planes dominating the survival rates in the later years; shown in light blue for cluster 2 (LargeSaved) as seen in the lower right chart.
+
+The two interesting clusters are the LargeSaved and LargeDeadly airplane crash categories.  Both groups have relatively few crashes making up only 1.8% (LargeSaved) and 3.3% (LargeDeadly) of all the crashes in the cluster analysis. Additional comparisons between these two clusters may shed some light on crash causes and their deaths.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+# Creating a dataframe for each of the two clusters
+LargeDeadly <- AirCrash2[AirCrash2$Cluster == 1,]
+LargeSaved <- AirCrash2[AirCrash2$Cluster == 2,]
+
+library(gridExtra)
+library(ggplot2)
+library(dplyr)
+LDTrend <- ggplot(LargeDeadly,aes(x=Year, y=Fatalities)) + geom_bar(stat='identity',fill="red") +                  xlab("Year") + ylab("Fatalities") + ggtitle("LargeDeadly Fatalities by Year")
+#LDTrend
+
+LSTrend <- ggplot(LargeSaved,aes(x=Year, y=Fatalities)) + geom_bar(stat='identity',fill="dark red") +                  xlab("Year") + ylab("Fatalities") + ggtitle("LargeSaved Fatalities by Year")
+#LSTrend
+
+grid.arrange(LDTrend, LSTrend)
+```
+The difference in the frequency and number of fatalities between LargeDeadly and LargeSaved are starkly shown above. LargeSaved not only had fewer crashes, the fatalities were significantly smaller with no more than 200 deaths in a crash vs. over 1500 deaths on a crash for Large Deadly.  On the positivie side, fatalities for these clusters of large passenger planes appear to be trending down from the 1990's to 2010.
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+library(gridExtra)
+library(dplyr)
+library(ggplot2)
+
+# Chart top 5 Operators by Survivor and Cluster
+LDSurvivors <- ggplot(top_n(LargeDeadly,n=5,Survivors),aes(x=reorder(Operator,Survivors), y=Survivors)) + geom_bar(stat='identity',fill="blue") + coord_flip () + xlab("Airline Operator") + 
+  ylab("Cumulative Survivors") + ggtitle("Top 5 LargeDeadly Survivors by Airline Operator")
+
+
+LSSurvivors <- ggplot(top_n(LargeSaved,n=5,Survivors),aes(x=reorder(Operator,Survivors), y=Survivors)) + geom_bar(stat='identity',fill="dark green") + coord_flip () + xlab("Airline Operator") + 
+  ylab("Cumulative Survivors") + ggtitle("Top 5 LargeSaved Survivors by Airline Operator")
+
+grid.arrange(LDSurvivors, LSSurvivors)
+
+```
+The top 5 crashes with the highest number of survivors by operator shows very different results for the two large passenger plane clusters.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(gridExtra)
+library(ggplot2)
+library(dplyr)
+LDDeaths <- ggplot(top_n(LargeDeadly,n=5,Fatalities),aes(x=reorder(Type,Fatalities), y=Fatalities)) + geom_bar(stat='identity',fill="blue") + coord_flip () + xlab("AirCraft Model") + 
+  ylab("Fatalities") + ggtitle("Top 5 LargeDeadly Fatalities by Plane Model")
+#LDDeaths
+
+LSDeaths <- ggplot(top_n(LargeSaved,n=5,Fatalities),aes(x=reorder(Type,Fatalities), y=Fatalities)) + geom_bar(stat='identity',fill="dark green") + coord_flip () + xlab("AirCraft Model") + 
+  ylab("Fatalities") + ggtitle("Top 5 LargeSaved Fatalities by Plane Model")
+#LSDeaths
+
+grid.arrange(LDDeaths, LSDeaths)
+```
+Among the top 5 crashes with the highest number of fatalities by AirCraft Model, similarities do appear between the two large plane clusters with DC-10 and Boeing-747 models topping the list for both. 
+
+To determine if different descriptions applied to largely fatal large passenger crashes vs. largely survivable large passenger crashes, the Summary section of the dataset may provide insight to key words common to each cluster.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+#install.packages("RColorBrewer")
+#install.packages("wordcloud")
+#install.packages("SnowballC")
+#install.packages(RColorBrewer)
+library(SnowballC)
+library(wordcloud)
+library(tm)
+library(RColorBrewer)
+
+# Create word vectors by record for each cluster
+corpusLD <-Corpus(VectorSource(AirCrash2[AirCrash2$Cluster == 1,13]))
+corpusLS <-Corpus(VectorSource(AirCrash2[AirCrash2$Cluster == 2,13]))
+
+# Create Term Document Matrix for each corpus
+
+LargeDeadlyTDM <- TermDocumentMatrix(corpusLD,control = list(stopwords = TRUE,
+              removePunctuation=TRUE,tolower = TRUE,removeNumbers=TRUE))
+# Remove sparse terms from LargeDeadlyTDM
+LargeDeadlyTDM <- removeSparseTerms(LargeDeadlyTDM, 0.99)
+
+LargeSavedTDM <- TermDocumentMatrix(corpusLS,control = list(stopwords = TRUE,
+              removePunctuation=TRUE,tolower = TRUE,removeNumbers=TRUE))
+# Remove sparse terms from LargeSavedTDM
+LargeSavedTDM <- removeSparseTerms(LargeSavedTDM, 0.99)
+
+ld <- as.matrix(LargeDeadlyTDM)
+ldv <-sort(rowSums(ld),decreasing = TRUE)
+dfld<- data.frame(word=names(ldv),freq=ldv)
+LargeDeadlyWC <- wordcloud(words = dfld$word,freq = dfld$freq,min.freq = 1,
+                       max.words = 100, colors = brewer.pal(6,"Dark2"))
+```
+LargeDeadly WordCloud Cluster
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+ls <- as.matrix(LargeSavedTDM)
+lsv <-sort(rowSums(ls),decreasing = TRUE)
+dfls<- data.frame(word=names(lsv),freq=lsv)
+LargeSavedWC <- wordcloud(words = dfls$word,freq = dfls$freq,min.freq = 1,
+                       max.words = 100, colors = brewer.pal(6,"Dark2"))
+```
+LargeSaved WorldCloud Cluster
+
+What was immediately apparent when comparing the worldclouds of LargeDeadly to LargeSaved were the similarities in words such as "aircraft", "plane", "crew", "airport", etc.. However, the difference in frequency of some words (made apparent by the font size of the words) revealed interesting insights.  For instance the word "crashed" is mentioned less frequently in LargeSaved while appearing prominently large in LargeDeadly.  The word "runway" was the most frequent word in the LargeSaved cluster inferring the importance of a runway presssence among survivable crashes. From the word similarities an inference can be made that there are many common crash causes between the two cluster groups. The disimilarities on the otherhand may give more insight.  For instance the words "struck", "mountain", "stall", "collision" and "exploded" are only seen in the wordcloud for LargeDeadly.  While the words "fog", "goaround" and "hijacked" are only seen in the wordcloud for LargeSaved.  
+
+Model:
+
+In an attempt to create a classification model that will accurately assign plane crash events to the appropriate cluster group a decision tree classification analysis technique was applied. The variables used to train the model will be identical to variables used for the cluster analysis: the number of people aboard, fatalities, survivors and survival rates along with plane crash events that occurred within twenty year intervals from 1908 to 2009.
+
+Attempts were also made to use additional variables to train the decision tree model. Unlike the kmeans cluster algorithm, which can only use continuous data, the rpart decistion tree algorithm allows for any data type to be used. Adding variables to train the decision treed could have resulted in new insights about how the characteristics may influence the classification process.  Unfortunately most of the nominal variables in the original data are too numerous and unique. This creates a problem for the algorithm especially when it needs to consider thousands of options for one variable. Due to this issue, the decision was made to use the same data points used in the kmeans cluster algorithm to predict its classification tree.
+
+Prepare a dataset named AirCrashDT for the Decision Tree algorithm to analyze.
+```{r DecisionTree1, echo=TRUE, warning=FALSE}
+#install.packages("dplyr")
+library(dplyr)
+# Extract the key variables from AirCras2 into a data frame AirCrashDT.
+AirCrashDT <- AirCrash2[,c(10,11,14,15,18)]
+# Create binominal values by score years in AirScore
+AirScore <- data.frame(Year = AirCrash2$Year)
+AirScore$Y1908_Y1929 <- ifelse(AirScore$Year > 1929,0,1)
+AirScore$Y1930_Y1949 <- ifelse(between(AirScore$Year,1930,1949), 1,0 )
+AirScore$Y1950_Y1969 <- ifelse(between(AirScore$Year,1950,1969), 1,0 )
+AirScore$Y1970_Y1989 <- ifelse(between(AirScore$Year,1970,1989), 1,0 )
+AirScore$Y1990_Y2009 <- ifelse(AirScore$Year > 1989 ,1,0)
+# Bind AirScore binomial variables to AirCrashDT
+AirCrashDT <- data.frame(AirCrashDT,AirScore[,-1])
+
+head(AirCrashDT)
+tail(AirCrashDT)
+```
+
+Split the AirCrashDT dataset into a train set to train the model and a test set to test the model's accuracy.  A 75/25 train/test split was used.
+```{r train&test, echo=TRUE, warning=FALSE}
+
+#install.packages("caret")
+library(caret)
+# Use the createDataPartition function in {caret} to create train and test datasets.
+set.seed(45)
+sample <- createDataPartition(AirCrashDT$ClustID, p=0.75, list = FALSE)
+train <- AirCrashDT[sample,]
+test <- AirCrashDT[-sample,]
+dim(train)
+dim(test)
+```
+
+Train the model on the train dataset and check the model's summary
+```{r echo=TRUE, warning=FALSE}
+#install.packages("rpart")
+library(rpart)
+set.seed(45)
+model1 <- rpart(ClustID~., data = train, method = "class")
+summary(model1)
+```
+
+Use the model to predict both the train and test datasets. 
+```{r echo=TRUE, warning=FALSE}
+# Use model1 to predict the test data
+predictTrn1 <- predict(model1, train, type = "class")
+predictTst1 <- predict(model1, test, type = "class")
+# Plot the number of splits
+rsq.rpart(model1)
+plotcp(model1)
+```
+The r-square to number of splits chart and the x-relative error to number splits chart indicate the model to be a very good fit. The plotcp chart comparing the x-valRelative Error to the complexity parameter suggest the decision tree provides optimal predictions "unpruned" or as a "fully grown tree." 
+
+
+Generate a visualization of the Decision Tree for model1 
+```{r echo=TRUE, warning=FALSE}
+#install.packages("rattle")
+library(rattle)
+# Plot the Decision Tree for model1
+fancyRpartPlot(model1)
+```
+The Decision Tree illustrates clearly how the clusters were defined with the number of people aboard, fatalities and survival rate as the key factors.
+
+```{r echo=TRUE, warning=FALSE}
+# Confusion matrix to find correct and incorrect predictions
+table(ClustID = predictTrn1, Actual_Train = train$ClustID)
+table(ClustID = predictTst1, Actual_Test = test$ClustID )
+dim(train)
+dim(test)
+```
+The model1 algorithm predicted the train dataset with 99.34% correctly classified and predicted the test dataset with 99.18% correctly classified.  The results suggest the model is very accurate and does not have an overfitting issue given the similar accuracy results on both datasets.
+
+Although initial results were excellent, to validate that the best possible model was used a 10 fold cross validation (cv) test was made to check the accuracy at 10 complexity parameter (cp) values to find the best "pruned" model.  The train function in the caret package will be used to automatically generate the models and identify the best model using the trainControl set to 10 for a 10 fold cv and the tuneLength set to 10 to specify then number of cp values to evaluate.  An Accuracy to Complexity Parameter will be used to visualize the results.
+```{r echo=TRUE, warning=FALSE}
+library(caret)
+library(rpart)
+# Fit the model on the train set.
+# Note: the trainControl sets the number of cross validation folds
+# and the tuneLength sets the number of cp values to evaluate.
+set.seed(45)
+model2 <- train(ClustID~.,data=train, method = "rpart",
+               trControl=trainControl("cv", number = 10),  tuneLength = 10)
+plot(model2)
+model2
+```
+All 10 cp values tested generated accuracies ranging from 0.8397 to 0.9927.  The best cp accuracy was 0.000 indicating the best results are achieved with no pruning. The model at the cp value with the highest accuracy was automatically used and identified by the function as model2$finalModel
+
+Use model2 to predict the train, test and full AirCrashDT datasets.  Compare the results. Generate a visualization of the model2$finalModel Decision Tree.
+```{r echo=TRUE, warning=FALSE}
+library(caret)
+library(rpart)
+library(rattle)
+# Use model2 to predict the train and test datasets
+predictTrn2 <- predict(model2,train)
+predictTst2 <- predict(model2,test)
+predictACDT <- predict(model2,AirCrashDT)
+# Confusion matrix to find correct and incorrect predictions
+table(ClustID = predictTrn1, Actual_Train = train$ClustID)
+table(ClustID = predictTst1, Actual_Test = test$ClustID )
+table(ClustID = predictACDT, Actual_Data = AirCrashDT$ClustID)
+dim(train)
+dim(test)
+dim(AirCrashDT)
+
+# Plot the number of splits
+fancyRpartPlot(model2$finalModel)
+```
+
+```{r echo=TRUE, warning=FALSE}
+# Adding the predicted class as a new variable to the AirCrash2 dataset.
+# This will be used to compare characteristic differences between the 
+# cluster analysis and classification predictions
+AirCrash2$Class <- predictACDT
+
+# Aggregating the mean values by Aboard, Fatalities, Survivors and Survival Rate by Class
+# Minimum and Maximum aggregations were also made for Aboard.
+AboardClass <- aggregate(AirCrash2$Aboard, by=list(Class = AirCrash2$Class),FUN = mean)
+AboardClassx <- aggregate(AirCrash2$Aboard, by=list(Class = AirCrash2$Class),FUN = max)
+AboardClassm <- aggregate(AirCrash2$Aboard, by=list(Class = AirCrash2$Class),FUN = min)
+DeathClass <- aggregate(AirCrash2$Fatalities, by=list(AirCrash2$Class), FUN = mean)
+SurviveClass <- aggregate(AirCrash2$Survivors, by = list(AirCrash2$Class), FUN = mean)
+SRateClass <- aggregate(AirCrash2$SurvivalRate, by = list(AirCrash2$Class), FUN = mean)
+PlaneClass <- data.frame(table(AirCrash2$Class))
+
+# Binding the aggregated values into a data frame.
+PClass <- data.frame(cbind(Class =PlaneClass$Var1,
+                             Plane_Crashes = PlaneClass$Freq, Min_Aboard =AboardClassm$x,
+                             Max_Aboard = AboardClassx$x, Mean_Aboard = AboardClass$x,
+                             Mean_Fatalities = DeathClass$x, Mean_Survivors = SurviveClass$x, 
+                             Mean_SurvivalRate = SRateClass$x))
+PClass
+```
+
+Results:
+
+A decision tree classification model was trained to identify the 4 types of plane crash clusters: SmallCrash, MidsizeCrash, LargeDeadly and LargeSaved. The key variables used to train the model were the number of people aboard, number of fatalities, number of survivors, the survival rate and crash events by 20 year intervals. The 20 year interval variables were added to determine if technological advances over the years may have had an effect on the classification of crash events.  The model was trained on 75% of the data with the remaining 25% used as a test dataset.
+
+One of the key challenges of a decision tree is to identify the appropriate pruning site or optimal number of splits that provide the most accurate predictions without overfitting the data or have diminishing returns. A 10 fold cross validation using 10 complexity parameter (cp) values were used on the train dataset to identify a model with a cp value with the highest accuracy.  The results ranged from a 0.8397 accuracy with cp = 0.70 to a 0.9926 accuracy with a cp = to 0.00 suggesting a full grown tree provided the best results. The full grown tree model was then used to predict both the train and test data sets resulting in a 99.34% correctly predicted on the train and 99.18% correctly predicted on the test indicating the model was very accurate and did not show signs of overfitting due to the similar results between the train and test data. The final decision tree model illustrated the key factors to determining the leaf nodes were number of people aboard, fatalities and survival rate. 
+
+Comparing the characteristics between the original clusters and the classes predicted by the decision tree, shows very little difference between the two results with less than a percent of the crash events shuffled between the cluster versus class segments. Neither the cluster nor decision tree techniques resulted in clear unique delineations on the range of the number aboard, fatalities or survivors.  However, the decision tree did provide a distinct method on how to identify key factors and use their values to reach an ultimate class assignment for a crash event, which provides an advantage over the unknown key variables behind the unsupervised cluster analysis technique.
+
+Conclusion:
+
+Using the cluster results as the target classes for the decision tree model is a logical method to further examine the key factors determining the resulting class assignments. The deciion tree model used in this analysis was not expected to improve or have greatly different results from the cluster analysis since it was essentially trained to predict classes that matched the clusters. Instead the decision tree model was used to shed light on the key factors that drive the classification process to arrive at its conclusions.  In this aspect the decision tree provides greater insight into the weight or importance of each variable in determining its results.  Unfortunately, insight into how a cluster analysis arrives at its conclusions are not easily accessible without further exploration into the characteristics of its cluster results.
+
+The advantages of using a decision tree to target the same outcomes of a cluster analysis is to gain some insight on the key factors.  The findings showed that 3 key factors played an important role in determining the classes.  The number aboard a crash event was among the highest or first factors to detemine the class splits followed by the number of fatalities and the survival rate.  The combination of these three factors were enough create a model that could predict the correct class with a 99% accuracy. The decision tree also provided the key values for each factor at each split giving a clear definition and guidance on how each factor contributed to the conclusions. 
+
+In conclusion cluster analysis provided meaningful segments that provided initial insights to the chraracteristics of a survivable or deadly crash. However, the analysis did not provide clear guidance on how its segmentations were determined. By applying a decision tree classification analysis with the cluster results as the target classes, a method to determining the key factors and the importance of their roles towards determining the classes can be easily and simply illustrated. While the decision tree does not necessarily provide improved results revealed by the clustering analysis, it does provide a better understanding and comprehensive insight into how the classes have been defined. It is through this advantage that the decision tree can be used to illuminate new insights that are not easily revealed in the unsupervised cluster analysis model.
+
