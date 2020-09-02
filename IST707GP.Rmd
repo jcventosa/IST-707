@@ -8,7 +8,7 @@ output:
 
 Introduction:
 
-Auto insurance is mandated in most states to provide drivers and automobile owners financial protection in the event of an accident. Laws vary from state to state and insurance coverages are designed to meet state laws while also providing customized policies to meet individual needs.  Insurance policies are generally issued for six-month to one-year timeframes. When nearing a policy's expiration, insurance companies send renewal offers to retain customers and collect premiums. As a highly competitive industry customer churn rate averages at approximately 22% every year (https://bit.ly/3fgvVXv) making customer retention one of the most important factors for success. 
+Auto insurance is mandated in most states to provide drivers and automobile owners financial protection in the event of an accident. Laws vary from state to state and insurance coverages are designed to meet state laws while also providing customized policies to meet individual needs.  Insurance policies are generally issued for six-month to one-year timeframes. When nearing a policy's expiration, insurance companies send renewal offers to retain customers and collect premiums. As a highly competitive industry customer churn rate averages at approximately 12% every year (https://bit.ly/3fgvVXv) making customer retention one of the most important factors for success. 
 
 FMTV Auto Insurance maintains and updates its customer records in order to discover new and effective ways to retain its clientele. The company provides both personal and company auto insurance and attempts to offer customized insurance renewals to best meet their clients' varying needs. As part of its marketing efforts to retain clients, FMTV sends out one of four renewal offers to customers nearing the end of their policy terms. A purchase or non-purchase response to the offers are recorded to determine the marketing return on investment. Recently purchase response rates to their renewal offers have been down. The marketing department questions whether a more effective method of distributing renewal offers may increase purchases and reduce customer churn. 
 
@@ -135,11 +135,20 @@ sum(is.na(auto$IncomeBin))
 head(auto[,c(10,26)],15)
 ```
 
-```{r include=FALSE}
+```{r eval=FALSE, include=FALSE}
 # Write the cleaned data to a csv file named auto.csv
-write.csv("~/Desktop/auto.csv")
+write.csv(auto,"~/Desktop/auto.csv")
 ```
 Exploratory Data Analysis:
+
+```{r}
+hist(auto$Income)
+hist(auto$Total.Claim.Amount)
+hist(auto$Monthly.Premium.Auto)
+hist(auto$Months.Since.Last.Claim)
+hist(auto$Months.Since.Policy.Inception)
+hist(auto$Customer.Lifetime.Value)
+```
 
 Client demographic background by Policy Type
 ```{r}
@@ -178,9 +187,14 @@ grid.arrange(PTState, PTLocation)
 The majority of all three policy types are in California followed by Oregon, Arizona, Nevada and Washington. Suburban regions have over three times the number of Corporate and Personal policy types compared to Rural and Urban regions. Sixty-0ne percent of Special policy types are also located in Surban regions with Rural and Urban each making up approximately 14%-15%.  
 
 ```{r}
+auto$Education <- factor(auto$Education, levels = c("High School or Below", "College", 
+                                                    "Bachelor", "Master", "Doctor"))
+auto$EmploymentStatus <- factor(auto$EmploymentStatus, levels = c("Employed", "Unemployed",
+                                                        "Retired", "Disabled", "Medical Leave"))
+
 PTEmployment <- ggplot(auto, aes(x=Policy.Type, fill = EmploymentStatus)) + geom_bar(stat = "count") +
     xlab("Policy Type") + ylab("Policy Count") + ggtitle("Policy Type by Employment Status") +
-  scale_fill_brewer (palette = "Paired", name = "Employment Status")
+  scale_fill_brewer (palette = "Set1", name = "Employment Status")
 
 PTIncomeBin <- ggplot(auto, aes(x=Policy.Type, fill = IncomeBin)) + geom_bar(stat = "count") +
     xlab("Policy Type") + ylab("Policy Count") + ggtitle("Policy Type by Income") +
@@ -197,24 +211,250 @@ PTEducation
 PTEmployment
 PTIncomeBin
 ```
-There is nearly an equal distribution of clients with High School or Less, College and Bachelors where each education level makes up approximately 30% of each policy type.  The synchronicity in Employed and Unemployed is also true making up approximately 62% and 25% of each policy type respectively. Lastly 44%-45% all three policy types have incomes less than $30000.
+There is nearly an equal distribution of clients with High School or Less, College and Bachelors where each education level makes up approximately 30% of each policy type.  The synchronicity in Employed and Unemployed is also true making up approximately 62% and 25% of each policy type respectively. Lastly 44%-45% all three policy types have incomes less than $30,000.
 
 Exploring Renewal Offers
 
 ```{r}
 table(auto$Renew.Offer.Type, auto$Policy.Type)
 
+# MyTheme to format font sizes for my graphs
+MyTheme <- theme(axis.text = element_text(size = 14), 
+          axis.title = element_text(size = 16, face ="bold"), 
+          plot.title = element_text(size = 20, face = "bold"))
+MyTheme2 <- theme(axis.text = element_text(size = 10), 
+                  axis.title = element_text(size = 18, face ="bold"), 
+                  plot.title = element_text(size = 20, face = "bold"), 
+                  axis.text.x = element_text(angle = 90))
+
 ggplot(auto, aes(x=Renew.Offer.Type, fill = Policy.Type)) + geom_bar(stat="count")+
   xlab("Renewal Offer Type") + ylab("Policy Count") + ggtitle("Renewal Offer Type by Policy Type") +
-  scale_fill_brewer(palette = "YlOrBr")
+  scale_fill_brewer(palette = "YlOrBr") + MyTheme
+
+ggplot(auto, aes(x=Renew.Offer.Type, fill = Policy.Type)) + geom_bar(stat="count", position = "fill")+
+  xlab("Renewal Offer Type") + ylab("") + ggtitle("Percent of Renewal Offer Types by Policy Type") +
+  scale_fill_brewer(palette = "YlOrBr") + MyTheme
 ```
-Each client from the three policy types received a single renewal offer type of 1, 2, 3 or 4 and each policy type received approximately   Offer 1 was distributed to approximately 41% of each policy which were distributed approximately 41%, 32%, 25% and 12% of prespectively, 
+Each client from the three policy types received a single renewal offer type of 1, 2, 3 or 4.  Offer 1 had the highest distribution; received by 41% of the clients.  Offer 2 was received by 32%, Offer 3 by 16% and Offer 4 received by 11% of the clients. Interestingly the offer types were distributed at nearly equal percentages by each policy type.
+
+```{r}
+ROGender <- ggplot(auto, aes(x= Renew.Offer.Type, fill=Gender)) + 
+  geom_bar(stat = "count", position = "fill") + 
+  xlab("Renew Offer Type") + ylab("") + 
+  ggtitle("Percent of Renew Offer Type by Gender") +
+  scale_fill_brewer (palette = "Set1", labels = c("Female", "Male"))
+
+ROMarital <- ggplot(auto, aes(x=Renew.Offer.Type, fill = Marital.Status)) + 
+  geom_bar(stat = "count", position = "fill") +
+    xlab("Renew Offer Type") + ylab("") + 
+  ggtitle("Percent of Renew Offer Type by Marital Status") +
+  scale_fill_brewer (palette = "Dark2", name = "Marital Status") 
+
+table(auto$Renew.Offer.Type, auto$Gender)
+table(auto$Renew.Offer.Type, auto$Marital.Status)
+grid.arrange(ROGender, ROMarital)
+```
+The offers were also distributed at nearly equal proportions by Gender and Marital Status
+
+```{r}
+
+ROState <- ggplot(auto, aes(x=Renew.Offer.Type, fill = State)) + 
+  geom_bar(stat = "count", position = "fill") +
+    xlab("Renew Offer Type") + ylab("") + 
+  ggtitle("Percent of Renew Offer Types by State") +
+  scale_fill_brewer (palette = "Accent", name = "State") 
+
+ROLocation <- ggplot(auto, aes(x=Renew.Offer.Type, fill = Location.Code)) + 
+  geom_bar(stat = "count", position = "fill") +
+    xlab("Renew Offer Type") + ylab("") + 
+  ggtitle("Percent of Renew Offer Types by Region") +
+  scale_fill_brewer (palette = "Dark2", name = "Region") 
+
+table(auto$Renew.Offer.Type, auto$State)
+table(auto$Renew.Offer.Type, auto$Location.Code)
+grid.arrange(ROState, ROLocation) 
+```
+The Renewal Offers were also distributed at nearly equal proportions by State and Region
+
+```{r}
+Mytheme <- theme(axis.text = element_text(size = 12), 
+          axis.title = element_text(size = 14, face ="bold"), 
+          plot.title = element_text(size = 16, face = "bold"))
+
+ROEmployment <- ggplot(auto, aes(x=Renew.Offer.Type, fill = EmploymentStatus)) + 
+  geom_bar(stat = "count", position = "fill") +
+    xlab("Renew Offer Type") + ylab("") + 
+  ggtitle("Percent of Renew Offer Type by Employment Status") +
+  scale_fill_brewer (palette = "YlOrBr", name = "Employment Status") + Mytheme
+
+ROIncomeBin <- ggplot(auto, aes(x=Renew.Offer.Type, fill = IncomeBin)) + 
+  geom_bar(stat = "count", position = "fill") +
+    xlab("Renew Offer Type") + ylab("") + 
+  ggtitle("Percent of Renew Offer Type by Income") +
+  scale_fill_brewer (palette = "OrRd", name = "Income") + Mytheme
+
+ROEducation <- ggplot(auto, aes(x=Renew.Offer.Type, fill = Education)) + 
+  geom_bar(stat = "count", position = "fill") +
+    xlab("Renew Offer Type") + ylab("") + 
+  ggtitle("Percent of Renew Offer Type by Education Level") +
+  scale_fill_brewer (palette = "Oranges", name = "Education") + Mytheme
+
+table(auto$Renew.Offer.Type, auto$Education)
+table(auto$Renew.Offer.Type, auto$EmploymentStatus)
+table(auto$Renew.Offer.Type, auto$IncomeBin)
+ROEducation
+ROEmployment
+ROIncomeBin
+```
+There are minor differences in how the offers were distributed by education level with Offer 1 more heavily distributed among College and Bachelor than other offers. Offer 1 was also received by a lower proportion of employed clients compared to the other offers. This difference was also evident in the income levels as nearly 70% of Offer 1 recipients had incomes below $45k compared to 51% to 59% of recipients of Offer 2, 3 and 4. 
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+ggplot(auto, aes(x=Renew.Offer.Type, fill = Response)) + geom_bar(stat = "count", position = "fill") +
+  xlab("Renew Offer Type") + ylab("") + ggtitle("Percent of Renew Offer Type by Response") +
+  scale_fill_manual(values = c("darkorange1", "darkorange4")) + theme(axis.text = element_text(size = 12), 
+          axis.title = element_text(size = 14, face ="bold"), 
+          plot.title = element_text(size = 18, face = "bold"))
+```
+The purchase response rates for the renew offers were very low. Offer 2 had the best purchase response rate at 23.4% followed by Offer 1 with a purchase response rate of 15.8%. Only 2% of Offer 3 recipients made a renewal while Offer 4 was declined by all client recipients.
+
+```{r}
+RPSGender <- ggplot(auto, aes(x= Gender, fill=Response)) + 
+  geom_bar(stat = "count", position = "fill") + 
+  xlab("Gender") + ylab("") + 
+  ggtitle("Percent of Gender by Response") +
+  scale_fill_brewer (palette = "Set1")
+
+RPSMarital <- ggplot(auto, aes(x=Marital.Status, fill = Response)) + 
+  geom_bar(stat = "count", position = "fill") +
+    xlab("Marital.Status") + ylab("") + 
+  ggtitle("Percent of Marital Status by Response") +
+  scale_fill_brewer (palette = "Dark2") 
+
+table(auto$Response, auto$Gender)
+table(auto$Response, auto$Marital.Status)
+grid.arrange(RPSGender, RPSMarital)
+```
+Men and women were equally as likely to respond with a "Yes".  Divorced clients were slightly more likely to say "Yes" to an offer.
+
+```{r}
+
+RPSState <- ggplot(auto, aes(x=State, fill = Response)) + 
+  geom_bar(stat = "count", position = "fill") +
+    xlab("State") + ylab("") + 
+  ggtitle("Percent of State Clients by Response") +
+  scale_fill_brewer (palette = "Accent") 
+
+RPSLocation <- ggplot(auto, aes(x=Location.Code, fill = Response)) + 
+  geom_bar(stat = "count", position = "fill") +
+    xlab("Region") + ylab("") + 
+  ggtitle("Percent of Region by Response") +
+  scale_fill_brewer (palette = "Dark2") 
+
+table(auto$Response, auto$State)
+table(auto$Response, auto$Location.Code)
+grid.arrange(RPSState, RPSLocation) 
+```
+The purchase response rates were fairly the same by state.  However, clients from Suburban areas did have a higher purchase response rate than Rural or Urban clients.
+
+```{r}
+RPSEmployment <- ggplot(auto, aes(x=EmploymentStatus, fill = Response)) + 
+  geom_bar(stat = "count", position = "fill") +
+    xlab("Employment Status") + ylab("") + 
+  ggtitle("Response Rate by Employment Status") +
+  scale_fill_manual (values = c("darkorange1", "darkorange4")) + Mytheme
+
+RPSIncomeBin <- ggplot(auto, aes(x=IncomeBin, fill = Response)) + 
+  geom_bar(stat = "count", position = "fill") +
+    xlab("Annual Income") + ylab("") + 
+  ggtitle("Response Rate by Income") +
+  scale_fill_brewer (palette = "Accent") + MyTheme2
+
+RPSEducation <- ggplot(auto, aes(x=Education, fill = Response)) + 
+  geom_bar(stat = "count", position = "fill") +
+    xlab("Education Level") + ylab("") + 
+  ggtitle("Response Rate by Education Level") +
+  scale_fill_brewer (palette = "YlOrBr", name = "Education") + MyTheme2
+
+table(auto$Response, auto$Education)
+table(auto$Response, auto$EmploymentStatus)
+table(auto$Response, auto$IncomeBin)
+RPSEducation
+RPSEmployment
+RPSIncomeBin
+```
+Clients with post graduate degrees were slightly more likely to accept the renewal offers they received. Nearly 75% or retired clients responded "Yes" to their renewal offers.  Clients earning between 15,000-29,999 and 60,000-74,999 answered "Yes" to renewal offers more often than clients of other income ranges.
+
+```{r}
+Mytheme2 <- theme(axis.text = element_text(size = 10), 
+                  axis.title = element_text(size = 14, face ="bold"), 
+                  plot.title = element_text(size = 16, face = "bold"), 
+                  axis.text.x = element_text(angle = 90))
+
+ggplot(auto, aes(x=CLV_Bins, fill = Response)) + 
+  geom_bar(stat = "count", position = "fill") +
+    xlab("Customer Lifetime Value") + ylab("Percent") + 
+  ggtitle("Response Rate by Customer Lifetime Value") +
+  scale_fill_brewer (palette = "Dark2", name = "Response") + Mytheme2
+```
+
+```{r}
+Offer1 <- auto[auto$Renew.Offer.Type=="Offer1",]
+Offer2 <- auto[auto$Renew.Offer.Type=="Offer2",]
+Offer12 <-data.frame(rbind(Offer1,Offer2))
+
+ggplot(Offer12, aes(x=Marital.Status, fill = Response)) + 
+  geom_bar(stat = "count", position = "fill") +
+    xlab("Marital Status") + ylab("Percent") + 
+  ggtitle("Response Rate to Offers 1 & 2 by Marital Status") +
+  scale_fill_manual (values = c("darkorange","darkorange4"), name = "Response") + Mytheme
+
+ggplot(Offer12, aes(x=EmploymentStatus, fill = Response)) + 
+  geom_bar(stat = "count", position = "fill") +
+    xlab("Employment Status") + ylab("Percent") + 
+  ggtitle("Response Rate to Offers 1 & 2 by Employment Status") +
+  scale_fill_brewer (palette = "Dark2", name = "Response") + Mytheme
+
+ggplot(Offer12, aes(x=Location.Code, fill = Response)) + 
+  geom_bar(stat = "count", position = "fill") +
+    xlab("Region") + ylab("Percent") + 
+  ggtitle("Response Rate to Offers 1 & 2 by Region") +
+  scale_fill_manual (values = c("tan1","tan4"), name = "Response") + Mytheme
+
+```
+
+```{r}
+ggplot(auto, aes(x=Monthly.Premium.Auto, y=Customer.Lifetime.Value)) + 
+  geom_point(aes(col = as.factor(Number.of.Open.Complaints), size = Months.Since.Last.Claim)) +
+  scale_color_brewer(palette="Spectral", name = "Number of Open Complaints") + xlab("Monthly Premium") + 
+  ylab("Customer Lifetime Value") + ggtitle("Key Factors to Customer Lifetime Value") +
+  labs(size ="Months Since Last Claim") + theme(axis.text = element_text(size = 10), 
+          axis.title = element_text(size = 12, face ="bold"), 
+          plot.title = element_text(size = 16, face = "bold"))
+```
+
 
 ```{r}
 ggplot(auto, aes(x=Total.Claim.Amount, y=Customer.Lifetime.Value)) + 
-  geom_point(aes(col=Renew.Offer.Type, shape = Response, size = Response)) +
-  scale_color_brewer(palette="Dark2")
+  geom_point(aes(col = as.factor(Number.of.Policies), size = Months.Since.Policy.Inception)) +
+  scale_color_brewer(palette="Spectral", name = "Number of Policies") + xlab("Total Claim Amount") + 
+  ylab("Customer Lifetime Value") + ggtitle("Key Factors to Customer Lifetime Value") +
+  labs(size ="Months Since Policy Inception") + theme(axis.text = element_text(size = 10), 
+          axis.title = element_text(size = 12, face ="bold"), 
+          plot.title = element_text(size = 16, face = "bold"))
 ```
+
+```{r}
+autoCorr <- auto[,c(3,10,13:17,22)]
+library(corrplot)
+library(corrgram)
+colnames(autoCorr) <- c("CLV", "Income", "Mon. Premium", "Mon Since Claim", "Mons Since Inception",
+                        "Open Complaints", "Num of Poicies", "Total Claim Amt.")
+autoCorr <- cor(autoCorr)
+corrplot(autoCorr, method = "number")
+```
+
 
 ```{r}
 hist(auto$Customer.Lifetime.Value)
@@ -261,8 +501,23 @@ CLV_Region
 California and Oregon are the states with the highest Customer Lifetime Value (CLV) customers. Suburban areas have higher CLV customers than other location codes.
 
 ```{r}
+#install.packages("RColorBrewer")
+library(RColorBrewer)
+CLV_Marital <- ggplot(auto, aes(x=Marital.Status, y=Customer.Lifetime.Value, 
+              fill = Gender ))+geom_col() + 
+        xlab("Marital") + ylab("Customer Lifetime Value") +
+        ggtitle("Customer Lifetime Value by Marital Status and Gender") +
+        scale_fill_brewer(palette = "Set1")
+        
+CLV_Marital
+```
+
+
+
+```{r}
 library(ggplot2)
-ggplot(auto, aes(x=State, y=Customer.Lifetime.Value, fill = Response)) + geom_col()
+ggplot(auto, aes(x=State, y=Customer.Lifetime.Value, fill = Response)) + 
+  geom_col(position = "fill")
 ```
 
 ```{r}
@@ -274,23 +529,12 @@ ggplot(auto, aes(x=Renew.Offer.Type, y=Customer.Lifetime.Value, fill = Response)
       scale_fill_brewer(palette = "Set1")
 ```
 
-**State Distribution**
-```{r}
-state.distribution <- table(auto$State)
-dfstate.distribution <- as.data.frame(state.distribution)
-colnames(dfstate.distribution) <- c("State", "Number of Customer")
-dfstate.distribution
-plot.SD <- plot(dfstate.distribution, main = "State Distributions")
-
-
-```
-
 **CLV and State Distribution**
 ```{r}
 CLV.statedf <- data.frame(auto$State, auto$Customer.Lifetime.Value)
 CLV.state <- tapply(CLV.statedf$auto.Customer.Lifetime.Value, CLV.statedf$auto.State, sum)
 CLV.state
-plot.CLV.state <- barplot(CLV.state, main = "CLV vs. State Distribution")
+plot.CLV.state <- barplot(CLV.state, main = "CLV by State")
 plot.CLV.state
 ```
 
@@ -298,7 +542,7 @@ plot.CLV.state
 ```{r}
 CLV.stateMean <- tapply(CLV.statedf$auto.Customer.Lifetime.Value, CLV.statedf$auto.State, mean)
 CLV.stateMean
-plot.CLV.stateMean <- barplot(CLV.state, main = "CLV Mean By State")
+plot.CLV.stateMean <- barplot(CLV.stateMean, main = "CLV Mean By State")
 plot.CLV.stateMean
 ```
 
@@ -307,7 +551,9 @@ plot.CLV.stateMean
 CLV.educationdf <- data.frame(auto$Customer.Lifetime.Value, auto$Education)
 CLV.education <- tapply(CLV.educationdf$auto.Customer.Lifetime.Value, CLV.educationdf$auto.Education, sum)
 CLV.education
-plot.CLV.education <- barplot(CLV.education, main = "CLV vs. Education Distribution")
+plot.CLV.education <- barplot(CLV.education, main = "CLV by Education Level", 
+                              cex.names = 0.8) +
+  Mytheme2
 plot.CLV.education
 ```
 
@@ -324,7 +570,7 @@ plot.CLV.educationMean
 CLV.genderdf <- data.frame(auto$Customer.Lifetime.Value, auto$Gender)
 CLV.gender <- tapply(CLV.genderdf$auto.Customer.Lifetime.Value, CLV.genderdf$auto.Gender, mean)
 CLV.gender
-plot.CLV.gender <- barplot(CLV.gender, main = "Average CLV Distribution For Gender")
+plot.CLV.gender <- barplot(CLV.gender, main = "Mean CLV by Gender")
 plot.CLV.gender
 ```
 
@@ -333,7 +579,7 @@ plot.CLV.gender
 CLV.IBdf <- data.frame(auto$Customer.Lifetime.Value, auto$IncomeBin)
 CLV.IB <- tapply(CLV.IBdf$auto.Customer.Lifetime.Value, CLV.IBdf$auto.IncomeBin, mean)
 CLV.IB
-plot.CLV.IB <- barplot(CLV.IB, main = "Average CLV Distribution in Each Incomebin")
+plot.CLV.IB <- barplot(CLV.IB, main = "Mean CLV by Income", las = 2, cex.names = 0.65)
 plot.CLV.IB
 ```
 

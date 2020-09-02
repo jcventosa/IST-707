@@ -1,0 +1,491 @@
+---
+title: Handwritten Digit Recognition Using Naive Bayes, Decision Tree, KNN, SVM and
+  Random Forest
+author: "Juan Ventosa"
+date: "8/26/2020"
+output: word_document
+---
+
+INTRODUCTION: 
+
+The Modified National Institute of Standards and Technology (MNIST) database is a collection of handwritten digits (0 through 9) that has been widely used for training and testing in the field of machine learning. The dataset has been made widely available to the public through online sites such as Kaggle.com allowing for anyone to analyze and train on machine learning classification techniques on the data.
+
+The applications for classifying and correctly identifying handwritten images are numerous. Some examples include the ability to recognize handwritten amounts on checks that can now be deposited through an image submitted by an app and the ability to sort U.S. mail by scanning the handwritten postal zip codes on envelopes. The concept of identifying handwritten images can also be applied to classifying and identifying other images such as searching for images of cats on the web to facial recognition.
+
+In the spirit of continuing the legacy of the MNIST database for machine learning an attempt to find the best machine learning algorithm with the highest accuracy to correctly classify the handwritten images will be made. Five machine learning algorithms will be tested: Naive Bayes, Decision Tree, k Nearest Neighbor (KNN), Support Vector Machine (SVM) and Random Forest. The National Institute of Standard and Technology (NIST) has set a high bar for these algorithms to replicate. In their original paper, "Gradient Based Learning Applied to Document Recognition by LeCun, Yann; Léon Bottou; Yoshua Bengio; Patrick Haffner (1998), the NIST authors used a support vector machine to get a 0.8% error rate.
+
+Libraries
+```{r include=FALSE}
+library(datasets)
+library(class)
+library(ggplot2)
+library(plyr)
+library(dplyr)
+library(lattice)
+library(caret)
+library(e1071)
+library(randomForest)
+library(tree)
+library(MASS)
+library(rpart)
+library(rpart.plot)
+library(naivebayes)
+library(tidyverse)
+library(RColorBrewer)
+library(rattle)
+library(cluster)
+library(foreign)
+library(maptree)
+library(FactoMineR)
+```
+
+ABOUT THE DATA: 
+
+Load Data: The Kaggle digits data contains a train and test data set. The train data set contains 42000 records. Only a 25% sample of the train data set will be used to train and cross validate the models.
+```{r}
+DigitTrain <- read.csv("~/Desktop/Kaggle-digit-train.csv", header = TRUE, stringsAsFactors = TRUE)
+DigitTrain$label <- as.factor(DigitTrain$label)
+dim(DigitTrain)
+```
+
+DigitTrain contains 42000 rows and 785 columns.
+
+Each record represents a handwritten image of a digit made up of 28 x 28 pixels for a total of 784 pixels. There is an interger pixel value associated with each pixel ranging from 0 to 255 representing gradient shades of gray from lightest to darkest respectively. The first column "label" shows what number the pixel data represents. The remaining 784 columns represent the pixel position and their values. 
+
+EXPLORATORY DATA ANALYSIS:
+
+Transform label variable so 0 = "zero", 1 = "one, 2 = "two..., 9 ="nine"
+```{r}
+DigitTrain$label=recode(DigitTrain$label, '0'="zero",'1'="one",'2'="two",'3'="three",
+                               '4'="four",'5'="five",'6'="six",'7'="seven",'8'="eight", '9'="nine")
+
+summary(DigitTrain$label)
+str(DigitTrain$label)
+```
+
+A random 25% sample of the DigitTrain data set will be used for cross validation experiments for each of the models (Naive Bayes, Decision Tree, K Nearest Neighbor, Support Vector Machine and Random Forest).
+```{r}
+# Take a random 25% sample of the MNIST Train data.
+set.seed(275)
+Split <- sample(nrow(DigitTrain),nrow(DigitTrain)*0.25)
+TSample <- DigitTrain[Split,]
+# Reserve the remaining MNIST data as a final test for the best performing models
+UTest <- DigitTrain[-Split,]
+dim(TSample)
+dim(UTest)
+```
+
+Compare distribution of values in the full DigitTrain data set with the 25% sample data set, TSample
+```{r}
+plotall <- ggplot(DigitTrain, aes(x=label, y= (..count..)/sum(..count..),fill = label)) + geom_bar() + labs(x="Digits", y="Relative Frequency", title = "Distribution of Values in DigitTrain") + scale_y_continuous(labels=scales::percent,limits = c(0,0.15)) + 
+  geom_text(stat="count", aes(label= scales::percent((..count..)/sum(..count..)),vjust=-1)) +
+  scale_fill_brewer(palette = "RdYlBu")
+
+plotsample <- ggplot(TSample, aes(x=label, y= (..count..)/sum(..count..),fill = label)) + geom_bar() + labs(x="Digits", y="Relative Frequency", title = "Distribution of Values in TSample") + scale_y_continuous(labels=scales::percent,limits = c(0,0.15)) + 
+  geom_text(stat="count", aes(label= scales::percent((..count..)/sum(..count..)),vjust=-1)) +
+  scale_fill_brewer(palette = "RdYlBu")
+
+plotall
+plotsample
+```
+The distribution of label variables in the full and sample data sets are acceptably comparable. The train sample (TSample) set will be used for cross validation experiments.
+
+Examine sample digit images by plotting the data images using first 18 records in DigitTrain.
+```{r}
+flip <- function(matrix) {
+  apply(matrix,2,rev)
+}
+
+par(mfrow=c(3,3))
+for (i in 1:18) {
+  digitimage <- flip(matrix(rev(as.numeric(TSample[i,-c(1,786)])),nrow = 28))
+  image(digitimage)
+}
+```
+
+PRINCIPAL COMPONENT ANALYSIS
+
+Principal Component Analysis (PCA) is a multivariate technique that allows us to summarize the systematic patterns of variations in the data. PCA is used for studying one table of observations and variables with the main idea of transforming the observed variables into a set of new variables, the principal components, which are uncorrelated and explain the variation in the data. PCA allows the reduction of a “complex” data set to a lower dimension in order to reveal the structures or the dominant types of variations in both the observations and the variables.
+
+Using this technique on the MNIST data may be effective due to the large amount of "white space" defined by the pixel value 0. The PCA function in the FactoMineR package defaults to finding 5 dominant dimensions. A value of 196 pricipal components or 25% of the dimensions in the original data will be used for a reduced yet robust PCA sample.
+```{r}
+pcaSample1 = PCA(t(TSample[,-1]), ncp = 196)
+pcaSample2 = PCA(t(UTest[,-1]), ncp = 196)
+```
+
+Combine the pcaSample dimension results with the labels to create pcaTrain and pcaUtest data.
+```{r}
+pcaTrain <- data.frame(label = TSample$label, pcaSample1$var$coord)
+pcaUTest <- data.frame(label = UTest$label, pcaSample2$var$coord)
+```
+
+MODEL:
+
+NAIVE BAYES
+The first of five models to be tested on its accuracy to correctly predict the label in the MNIST data set is Naive Bayes.  Naive Bayes is an algorithm that uses Bayes’ theorem to classify objects. Naive Bayes classifiers assume strong, or naive, independence between attributes of data points.
+
+Perform a 10 fold holdout cross validation test on both the TSample and pcaTrain data sets.
+
+Create a function to perform holdout cross validation on naive Bayes
+```{r echo=TRUE, warning=FALSE}
+# Create result bins for holdoutcv function
+AllResultest <- list()
+AllLabelstest <- list()
+
+NBholdoutcv <- function (data, N, kfolds) {
+  holdout <- split(sample(1:N),1:kfolds)
+  for (k in 1:kfolds) {
+  
+  test= data[holdout[[k]],]
+  train = data[-holdout[[k]],]
+
+# Make sure to remove Response from the testing data
+  test_response <- test$label
+  test_no_response <- test[,-1]
+
+# {naivebayes} package
+  model <- naive_bayes(label~., data = train, na.action = na.pass, 
+                                laplace = 1)
+  predtest <- predict(model,test_no_response)
+  
+  # Accumulate results from each fold
+  AllResultest <- c(AllResultest, predtest)
+  AllLabelstest <- c(AllLabelstest, test_response)
+  ConfMatrix <- table(Actual = unlist(AllLabelstest), Prediction = unlist(AllResultest))}
+  return(ConfMatrix)
+}
+```
+
+Run the NBholdoutcv function on the pcaTrain data and record the accuracy.
+```{r}
+# Number of observations
+Np <- nrow(pcaTrain)
+# Number of desired splits
+kfolds <- 10
+# Perform holdout cross validation using NBholdoutcv
+set.seed(123)
+NBholdoutcv(pcaTrain,Np,kfolds)
+```
+
+Repeat NBholdoutcv function on the TSample data and record the accuracy.
+```{r}
+# Number of observations
+Nt <- nrow(TSample)
+# Number of desired splits
+kfolds <- 10
+# Perform holdout cross validation using NBholdoutcv
+set.seed(123)
+NBholdoutcv(TSample,Nt,kfolds)
+```
+
+The Naive Bayes algorithm had higher prediction accuracy on the train data that was transformed by principal component analysis (pcaTrain) versus the original sample data set (TSample). Naive Bayes had an 81.1% accuracy at correctly predicting the labels on the pcaTrain.  A significant improvement over a 52.2% accuracy on the original sample data set, Tsample. 
+
+Utilize caret package to find optimal fit of Naive Bayes algorithm
+```{r}
+library(caret)
+# Lookup package model tuning options for optimal fit
+modelLookup(model = 'nb')
+
+# Train the model for best fit
+set.seed(123)
+NBbest <- train(label~., data=pcaTrain, method = "naive_bayes",
+                   trControl = trainControl("cv", number = 10),
+                   tuneLength = 10)
+
+NBbest$results
+NBbest$bestTune
+```
+The caret package 10 fold cross validation results suggest minor accuracy improvement if model used best tune of usekernel = FALSE, laplace = 0 and adjust = 1. The tuning changes did not have much of an improvement on default settings of the naive_bayes algorithm.  
+
+DECISION TREE
+
+A tree model in which each internal (non-leaf) node is labeled with an input feature. The
+arcs coming from a node labeled with an input feature are labeled with each of the possible values of the target feature or the arc leads to a subordinate decision node on a different input feature.
+
+The caret package will be utilized to execute a 10 fold cross validation to find the optimum pruning of the tree for best fit.
+```{r}
+# Split the TSample and pcaTrain data into train and test data sets at 80/20 split
+set.seed(275)
+TSsampledt <- sample(nrow(TSample),nrow(TSample)*0.80)
+TSDTtrain <- TSample[TSsampledt,]
+TSDTtest <- TSample[-TSsampledt,]
+
+set.seed(275)
+pcasampledt <- sample(nrow(pcaTrain),nrow(pcaTrain)*0.80)
+pcaDTtrain <- pcaTrain[pcasampledt,]
+pcaDTtest <- pcaTrain[-pcasampledt,]
+
+# Lookup caret model tuning options for rpart decision tree 
+modelLookup(model = "rpart")
+
+# Train model for best fit using 10 fold cross validation
+set.seed(123)
+TSDTmodel <- train(label~., data = TSDTtrain , method = "rpart",
+                trControl = trainControl("cv", number = 10),
+                tuneLength = 10)
+
+set.seed(123)
+pcaDTmodel <- train(label~., data = pcaDTtrain , method = "rpart",
+                trControl = trainControl("cv", number = 10),
+                tuneLength = 10)
+
+# Plot model accuracy vs different values of cp
+plot(TSDTmodel, main = "Original Data")
+plot(pcaDTmodel, main = "PCA Data")
+```
+At 63.58% accuracy with complexity parameter (cp) = 0.00995, the transformed principal component sample data provided better model training results than the best tune for the original data at cp = 0.01708 and 57.08% accuracy.  
+
+```{r}
+# TSDTmodel results
+head(TSDTmodel$results,3)
+
+# pcaDTmodel results
+head(pcaDTmodel$results, 3)
+```
+Use final pcaDTmodel to predict the pcaDTtest and use confusion matrix to record accuracy.
+```{r}
+# Execute model to predict label on test data
+pcaDTprediction <- predict(pcaDTmodel, pcaDTtest)
+
+# Confusion matrix of prediction results against actuals
+table(Actual = pcaDTtest$label, Prediction = pcaDTprediction)
+```
+The model correctly predicted the label at 61.71% accuracy, which is in line with the cross validation results on the PCA transformed train data accuracy of 63.58% indicating minimal over fitting on the model.
+
+Plot the final decision tree model.
+```{r}
+# Plot the final Decision Tree model
+fancyRpartPlot(pcaDTmodel$finalModel)
+```
+
+K NEAREST NEIGHBORS (KNN)
+
+KNN has been used in statistical estimation and pattern recognition as a non-parametric technique. It estimates how likely a data point is to be a member of one group or the other depending on the data points nearest proximity to a specified number (k) of groups. The k-nearest-neighbor is an example of a “lazy learner” algorithm, meaning that it does not build a model using the training set until a query of the data set is performed.
+
+Utilize the caret package to execute a knn 10 fold cross validation using the PCA transformed sample data (pcaTrain)
+```{r}
+# Split the pcaTrain data into train and test using an 80/20 split
+set.seed(275)
+pcasampleknn <- sample(nrow(pcaTrain),nrow(pcaTrain)*0.80)
+pcaknntrain <- pcaTrain[pcasampleknn,]
+pcaknntest <- pcaTrain[-pcasampleknn,]
+
+# Lookup caret parameter tuning options for knn
+modelLookup(model="knn")
+
+# Train the model using caret 10 fold cross validation to find best fit
+set.seed(123)
+pcaknnmodel <- train(label~., data = pcaknntrain, method = 'knn',
+                     trControl = trainControl("cv", number = 10))
+
+# Call cross validation results
+pcaknnmodel$results
+
+# plot accuracy parameter results
+plot(pcaknnmodel)
+```
+
+Caret 10 fold cross validation on the PCA transformed train sample data resulted in a knn model with a 95.17% accuracy at correctly predicting the labels with k = 5.
+
+Run the best tune final model based on the cross validation results on the test data and calculate the accuracy using a confusion matrix.
+```{r}
+# Predict the test data using best tune final knn model
+set.seed(123)
+pcaknnprediction <- predict(pcaknnmodel, pcaknntest[,-1])
+
+# Confusion matrix of results
+table(Actual = pcaknntest$label, Prediction = pcaknnprediction)
+```
+The knn model accurately predicted the test label correctly with 95.48% accuracy with fairly high precision on all labels. The accuracy was also comparable to the cross validation results on the train data indicating minimal over fitting of the model.
+
+SUPPORT VECTOR MACHINE
+
+A discriminative classifier formally defined by a separating hyperplane. The algorithm creates a line or a hyperplane, which separates the data into classes.
+
+Utilize caret package cross validation function to find best model for SVM Linear and SVM Radial using the MNIST data transformed by principal component analysis.
+```{r}
+# Split the TSample and pcaTrain data into train and test data sets at 80/20 split
+set.seed(275)
+pcasamplesvm <- sample(nrow(pcaTrain),nrow(pcaTrain)*0.80)
+pcaSVMtrain <- pcaTrain[pcasamplesvm,]
+pcaSVMtest <- pcaTrain[-pcasamplesvm,]
+
+# Lookup caret model tuning options for rpart decision tree 
+modelLookup(model = "svmLinear")
+
+# Train model for best fit using 10 fold cross validation
+set.seed(123)
+pcaSVMlinear <- train(label~., data = pcaSVMtrain , method = "svmLinear",
+                trControl = trainControl("cv", number = 10),
+                tuneLength = 10)
+
+pcaSVMlinear$results
+```
+
+Cross validation results for SVM model on PCA transformed data resulted in an 88.99% accuracy with the best model parameter of cost = 1.
+
+```{r}
+# Use pcaSVMlinear final model to predict test data
+pcaSVMprediction <- predict(pcaSVMlinear, pcaSVMtest)
+
+# Confusion Matrix to calculate accuracy on model on test data
+table(Actual = pcaSVMtest$label, Prediction = pcaSVMprediction)
+```
+The SVM model using the PCA transformed train sample data had an 88.33% accuracy which is a minimal difference from the pcaTrain cross validation accuracy result of 88.99% suggesting minimal over fitting.
+
+Due to an inablity to scale constant variables, the caret package was unable to execute an SVM cross validation on the original data sample (TSample) for comparison.  Instead a 10 fold holdout cross validation function will be created and performed on both the original data sample and the PCA transformed sample data for comparison.
+
+Create a function to perform a 10 fold holdout cross validation evaluations of SVM models.
+```{r echo=TRUE, warning=FALSE}
+library(e1071)
+# Create result bins for SVMholdoutcv function
+AllResultest <- list()
+AllLabelstest <- list()
+
+SVMholdoutcv <- function (data, N, kfolds) {
+  holdout <- split(sample(1:N),1:kfolds)
+  for (k in 1:kfolds) {
+  
+  train= data[holdout[[k]],]
+  test = data[-holdout[[k]],]
+  test_label <- test$label
+
+# {e1071} package
+  model <- svm(label~., data = train, kernel = "linear", cost = 1)
+  predtest <- predict(model,newdata = test, type=c("class"))
+  
+  # Accumulate results from each fold
+  AllResultest <- c(AllResultest, predtest)
+  AllLabelstest <- c(AllLabelstest, test_label)
+  ConfMatrix <- table(Actual = unlist(AllLabelstest), Prediction = unlist(AllResultest))}
+  return(ConfMatrix)
+}
+```
+
+Execute 10 fold cross validation SVM evaluation on the original sample data (TSample) and calculate the accuracy through a confusion matrix.
+```{r echo=TRUE, warning=FALSE}
+# Set up an experimental evaluation.
+# Number of observations
+Nt <- nrow(TSample)
+# Number of desired splits
+kfolds <- 10
+# Perform SVM holdout cross validation using SVMholdoutcv function
+set.seed(123)
+SVMholdoutcv(TSample, Nt, kfolds)
+```
+
+Execute 10 fold cross validation SVM evaluation on the sample data transformed by pricipal component analysis (pcaTrain)
+```{r echo=TRUE, warning=FALSE}
+# Set up an experimental evaluation.
+# Number of observations
+Np <- nrow(pcaTrain)
+# Number of desired splits
+kfolds <- 10
+# Perform SVM holdout cross validation using SVMholdoutcv function
+set.seed(123)
+SVMholdoutcv(pcaTrain, Np, kfolds)
+```
+In the case of the 10 fold holdout cross validation the Support Vector Machine (SVM) performed better on the original sample data with an 88.58% accuracy at predicting the label correctly.  The SVM model was less accurate at predicting the correct label on the data transformed by principal component analysis with an 81.26% accuracy. The results on the PCA data using the caret cross validation function against the holdout cross validation provided fairly different accuracies with 88.99% and 81.26% respectively.  However, the overall results for the SVM model have fallen more frequently in the 88% accuracy range.
+
+RANDOM FOREST
+
+An ensemble classifier that consists of many decision trees and outputs the class that is the mode of the classes output by individual trees.
+
+Once again the caret package will be utilized to execute a random forest 10 fold cross validation on both the original sample data and the PCA transformed sample data.
+
+Create a function to perform holdout cross validation evaluations of Random Forest models. The function will include an ntree and mtry designation.
+```{r echo=TRUE, warning=FALSE}
+library(randomForest)
+# Create result bins for RFholdoutcv function
+AllResultest <- list()
+AllLabelstest <- list()
+
+RFholdoutcv <- function (data, N, kfolds, treesize) {
+  holdout <- split(sample(1:N),1:kfolds)
+  for (k in 1:kfolds) {
+  
+  train= data[holdout[[k]],]
+  test = data[-holdout[[k]],]
+  test_label <- test$label
+
+# {e1071} package
+  model <- randomForest(label~., data = train, tree = treesize)
+  predtest <- predict(model,test, type=c("class"))
+  
+  # Accumulate results from each fold
+  AllResultest <- c(AllResultest, predtest)
+  AllLabelstest <- c(AllLabelstest, test_label)
+  ConfMatrix <- table(Actual = unlist(AllLabelstest), Prediction = unlist(AllResultest))}
+  return(ConfMatrix)
+}
+```
+
+Execute 10 fold cross validation random forest evaluation on the original sample data (TSample) with tree = 500 and calculate the accuracy through a confusion matrix.
+```{r echo=TRUE, warning=FALSE}
+# Set up an experimental evaluation.
+# Number of observations
+Nt <- nrow(TSample)
+# Number of desired splits
+kfolds <- 10
+# Perform SVM holdout cross validation using SVMholdoutcv function
+# Note: default mtry is calculated as rounded total predictor variables/3 = 196/3 = 65
+set.seed(123)
+RFholdoutcv(TSample, Nt, kfolds, 500) 
+```
+
+Execute 10 fold cross validation random forest evaluation on the PCA transformed sample data (pcaTrain) with tree = 500 and calculate the accuracy through a confusion matrix.
+```{r echo=TRUE, warning=FALSE}
+# Set up an experimental evaluation.
+# Number of observations
+Nt <- nrow(TSample)
+# Number of desired splits
+kfolds <- 10
+# Perform SVM holdout cross validation using RFholdoutcv function
+# Note: default mtry is calculated as rounded total predictor variables/3 = 196/3 = 65
+set.seed(123)
+RFholdoutcv(pcaTrain, Nt, kfolds, 500)
+
+```
+The Random Forest models favored training on the original sample data with 784 predictor variables or dimensions. It had a 90.5% accuracy at correctly classifying the handwritten image. By comparison the random forest model trained on the sample data transformed by PCA with 196 predictor variables had an 86.2% accuracy.
+
+Overall the KNN model trained on the sample data transformed by PCA had the highest accuracy and precision results.  As a final test, the best KNN model will be used to predict the remaining 75% of the MNIST train data that was excluded from the sample data.
+```{r}
+# Use the best KNN model to predict the 75% MNIST train data.
+KNNfinal <- predict(pcaknnmodel, pcaUTest[,-1])
+
+# Print results in a confusion matrix
+table(Actual = pcaUTest$label, Prediction = KNNfinal)
+```
+The KNN model's result on the final test had a 92.7% accuracy. This was slightly less than the cross validation results on the train data which had a 95.2% accuracy.
+
+RESULTS: 
+
+All models were trained on a 25% sample of the original MNIST train database along with the same sample data set transformed by principal component analysis using 196 principal components. The models were all subjected to a 10 fold cross validation to measure their classification accuracy. Only the best model results by algorithm will be covered. The algorithms will be discussed in the order of their performance from worst to best accuracy at correctly classifying the handwritten digits.
+
+The best Decision Tree model was trained on the sample data transformed by principal component analysis (PCA). Utilizing the caret package to run a 10 fold cross validation on the rpart algorithm with 10 tuning values used for the complexity parameter (cp), the best fit model used cp = 0.00995 for a nearly full grown tree. The use of PCA on the training data increased the accuracy from 57.1% without PCA to 63.6% with PCA. The precision at correctly classifying the digits were also low ranging from 29.6% accuracy on class '5' to 90.1% accuracy on class '7' with a mean precision of 61.0% for all classes combined.
+
+The best Naive Bayes model was also trained on the sample data transformed by PCA. The best results were based on the naive_bayes algorithm with parameters set to laplace = 0, usekernel = FALSE and adjust =1. The use of PCA on the training data significantly increased the model's accuracy from 52.2% to 81.1% at predicting the handwritten digits correctly. The precision at correctly identifying the digits ranged from a low of 59.1% for class '5' to 95.3% for class '7' with a mean precision of 81.9% for all classes combined. 
+
+The most accurate Support Vector Machine model was trained on the sample data without PCA transformation. The best model used was a linear classifier with a cost parameter = 1. It had an accuracy of 88.58% based on a 10 fold holdout cross validation. The best model trained on the sample data transformed by PCA performed only slightly less accurate at 88.33%. The difference is so minimal that distinguishing one to have performed better may be trivial.  The precision for correctly classifying the digits were also close with the mean precision for the model trained on the original sample data at 88.4% accurate with a min = 83.4% and max = to 94.0% vs. the mean precision of the model trained on the sample data transformed by PCA at 88.1% with min = 80.7% and max = 95.3%.
+
+The Random Forest models had higher cross validation accuracies when trained on the original sample data compared to the model trained on the sample data transformed by PCA. Both models were placed through a 10 fold holdout cross validation with tree size set to 500. The best model had an accuracy of 90.5% at correctly classifying the the digits with class precisions ranging from 85.4% to 92.8%. The cross validation results on the model trained on the sample data transformed by PCA had an accuracy of 86.2% with class precisions ranging from 78.9% to 93.0%.  
+
+The most accurate k-nearest neighbor (KNN) model was trained on the sample data transformed by PCA. The caret package 10 fold cross validation function with 10 values for k on the knn3 algorithm resulted in a best fit model with k = 5. The model had an accuracy of 95.2% at correctly classifying the digits.  It should also be noted that KNN performed well with k= 5 through 9 with accuracies for those values falling between 94.7% to 95.2%. The precision for the best fit KNN model on correctly classifying the digit was also very accurate with a mean precision of 95.5% with a range of 91.0% to 97.8%.  
+
+As reminder all the models were trained on a random 25% sample of the MNIST train data. With the highest accuracy and precision of all the 5 algorithms tested, the final best KNN model was placed through the final test of classifying the remaining 75% of the MNIST train data. In this final test the KNN model accurately classified the handwritten images correctly 92.7% of the time.
+
+Summary of Best Model Accuracy Results:
+Decision Tree =  63.6%
+Naive Bayes = 81.9%
+Support Vector Machine = 88.4%
+Random Forest = 90.5%
+K-Nearest Neighbors = 95.2%
+
+CONCLUSION:
+
+Of the five algorithms tested Decision Tree had the least overall accuracy at only 63.6%. Naive Bayes and Support Vector Machine models both performed adequately well with results that correctly identified the handwritten image 82% to 88% of the time. The Random Forest model provided slightly higher accuracies with the ability to identify the image 90% of the time. Lastly the KNN model achieved the best accuracy results correctly identifying the image 95% of the time.
+
+Although the perfomance of the algorithms varied in accuracy, each had their advantages and disadvantages. The Decision Tree and Naive Bayes models may have had the worse accuracy performance, but had the advantage of running fast classification models that required little tuning. The Decision Tree also has the added advantage of providing a guide on how its algorithm came to its classifications. SVM and Random Forest have been known to provide high accuracies in their classification results  along with high precision and recall. However, the models may require more time to calculate their results. KNN models can be very effective at classifying models primed for clusters. In this case KNN proved to be both effective and fast, having classified the hand written images in nearly half the time taken by Random Forest with a higher accuracy and precision.
+
+In the end the model of choice may depend on the needs of the user. Will providing results quickly be more economically feasible or is accuracy more important than speed?  The precision and recall of the models should also be considered since overall accuracy may not be as important a factor as having a high precision on a particular class prediction.  It should also be noted that if accuracy trumps speed, all of these models may be tuned to possibly perform better. For example the random forest model cross validation tests used here only attempted the use of 500 trees. Increasing the trees to 1000 or 20000 may change results and tweaking other parameters such as mtry which indicates the number of tree variations may also lead to more accurate predictions. The KNN model parameters used here may have ultimately provided the best results but other attempts by other users would likely change based on such factors as transforming the train data to give algorithms an edge or by tweaking the algorithms themselves. Although random forest and KNN performed best here, it should be noted that NIST achieved a 99.2% accuracy at classifying the same images using an SVM model.  In the end choosing the best algorithm for the job may depend on the data and may require multiple experiments and attempts to optimize results.
+
