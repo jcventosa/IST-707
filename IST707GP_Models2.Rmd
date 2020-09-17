@@ -1,0 +1,747 @@
+---
+title: "IST707GP_Models"
+author: "Juan Ventosa"
+date: "8/12/2020"
+output: word_document
+---
+
+Load the data
+```{r}
+auto <- read.csv("https://raw.githubusercontent.com/jcventosa/IST-707/master/auto.csv")
+# Remove row label
+auto <- auto[,-1]
+```
+
+Add discretized variables to be used in models
+```{r message=FALSE, include=FALSE}
+library(dplyr)
+# Adding predetermined Customer Lifetime Value categories.
+auto$CLV_Levels <- as.factor(ifelse(auto$Customer.Lifetime.Value < 5000, "Low_CLV",
+                   ifelse(between(auto$Customer.Lifetime.Value, 5000, 8000), "Avg_CLV",
+                   ifelse(between(auto$Customer.Lifetime.Value, 8001, 15000), "High_CLV",
+                          "Super_CLV"))))
+# Adding discretized variables for Months Since Policty Inception and 
+# Months Since Last Claim
+auto$MoInception <- as.factor(ifelse(auto$Months.Since.Policy.Inception < 24, "<_24_months",
+                      ifelse(between(auto$Months.Since.Policy.Inception, 24,48), "24-47_months",
+                      ifelse(between(auto$Months.Since.Policy.Inception,49,72), "48-71_months",
+                             "72+_months"))))
+auto$MoLastClaim <- as.factor(ifelse(auto$Months.Since.Last.Claim < 6, "<_6_months",
+                      ifelse(between(auto$Months.Since.Last.Claim, 6,11), "6-11_months",
+                      ifelse(between(auto$Months.Since.Last.Claim, 12,17), "12-17_months",
+                      ifelse(between(auto$Months.Since.Last.Claim, 18,23), "18-23_months",
+                      ifelse(between(auto$Months.Since.Last.Claim, 24,29), "24-29_months",
+                             "30+_months"))))))
+
+```
+
+###################################################
+########### ASSOCIATION RULES MINING ##############
+###################################################
+
+Association Rules Mining will be used to perform additional EDA on the customer characteristics associated with a "Yes" response to each of the offers.
+
+Prep a transaction dataset for Apriori ARM
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(arules)
+library(arulesViz)
+
+# auto data set w/o continuous data.  Includes previously discretized
+# CLV_Levels, IncomeBin, MoPremiumBin, ClaimBin, MoInception, MoLastClaim
+autodiscrete <- auto[,c(2,4,5,6,8,9,11,12,18,19,20,21,23,24,26,27,28,29,30,31)]
+
+# Separte the Offers 1, 2, and 3 into their own datasets.
+Offer1 <- autodiscrete[autodiscrete$Renew.Offer.Type == "Offer1",]
+Offer2 <- autodiscrete[autodiscrete$Renew.Offer.Type == "Offer2",]
+Offer3 <- autodiscrete[autodiscrete$Renew.Offer.Type == "Offer3",]
+
+# Remove Renew.Offer.Type variable from the datasets.
+Offer1 <- Offer1[,-11]
+Offer2 <- Offer2[,-11]
+Offer3 <- Offer3[,-11]
+
+# Convert Offer 1, 2 and 3 datasets into transactions
+autotrans1 <- as(Offer1,"transactions")
+autotrans2 <- as(Offer2, "transactions")
+autotrans3 <- as(Offer3, "transactions")
+
+# check format of autotrans(x) data
+autotrans1
+autotrans2
+autotrans3
+```
+
+```{r apriori ruleset1, echo=TRUE}
+YesRule1<-apriori(data=autotrans1, parameter=list(supp=0.019,conf = 0.70, maxlen=5), 
+               appearance = list(default="lhs",rhs="Response=Yes"),
+               control = list(verbose=FALSE))
+YesRule1<-sort(YesRule1, decreasing=TRUE,by="confidence")
+inspect(YesRule1[1:5])
+
+#plot(YesRule1,method="graph",engine = "htmlwidget")
+```    
+Approximately 16% of Offer 1 recipients responded yes to the offer.  The attributes commonly associated with a yes response to offer 1 were Suburban Retirees with Incomes in the 15k to 30k range with a Midsize Car and Basic Coverage.  (Support < 0.03 and Confidence >0.7 generated 28 rules with lifts > 3)
+
+
+```{r apriori ruleset2, echo=TRUE}
+YesRule2<-apriori(data=autotrans2, parameter=list(supp=0.02,conf = 0.50, minlen = 5), 
+               appearance = list(default="lhs",rhs="Response=Yes"),
+               control = list(verbose=FALSE))
+YesRule2<-sort(YesRule2, decreasing=TRUE,by="confidence")
+inspect(YesRule2[1:5])
+
+#plot(YesRule2,method="graph",engine = "htmlwidget" )
+```    
+Appoximately 23% of Offer 2 recipients responded yes to the offer. The attributes commonly associated with a yes response to Offer 2 were Suburban Married Women with Extended Coverage usually acquired through an sales agent. (Support < 0.03 and Confidence > 0.5 generated 16 rules with lifts > 2)
+
+```{r apriori ruleset3, echo=TRUE}
+YesRule3<-apriori(data=autotrans3, parameter=list(supp=0.01,conf = 0.10, maxlen=5), 
+               appearance = list(default="lhs",rhs="Response=Yes"),
+               control = list(verbose=FALSE))
+YesRule3<-sort(YesRule3, decreasing=TRUE,by="support")
+inspect(YesRule3[1:5])
+
+#plot(YesRule3,method="graph",engine = "htmlwidget" )
+```
+Only 2% of Offer 3 recipients responded yes to the offer. The attributes that were most associated with a yes response to Offer 3 were Married Men with Low_CLV and Total Claim Amounts ranging between 250 to 499 dollars. (Support < 0.013 and Confidence < 0.21 generated 6 rules with lifts > 5).  The low support and low confidence values for these outcomes suggest there is a high likelihood of chance association.
+
+The results from association rules mining determined that customer characteristics associated with a yes response differed by renew offer type. The findings suggest variables available in the data may be used to train classification models to provide better response predictions to the renew offers.  Since each customer was given only one of four offers to accept, it would be reasonable to provide customers who declined their offer one of the other 3 offers as an alternative. To provide the customer with the alternative offer with the highest probability of renewal, 3 models will be needed. Each model will be trained on one of the 3 offers. The model that predicts the highest probability of a customer's "Yes" response to an offer will determine the alternative offer the customer will receive.
+
+Four algorithm candidates have been chosen for the models: Decision Tree, Naive Bayes, Support Vector Machine (SVM) and Random Forest. A cross validation for each of the algorithms will be executed to assess the models' accuracy and precision at predicting a "Yes" or "No" response to Offers 1, 2 and 3. Note: Offer 4 was excluded because it did not receive a single "Yes" response.
+
+##################################################
+################## NAIVE BAYES ###################
+##################################################
+
+Libraries for Naive Bayes
+```{r nb, include=FALSE}
+library (naivebayes)
+library(klaR)
+library(e1071)
+library(caret)
+```
+
+EDA determined that none of the continuous variables in the data follow a Gaussian distribution based on visual inspection of histograms.  Therefore continuous variables require discretization to be included in Naive Bayes models. The discretized data sets (Offer1, Offer2, Offer3) created during the process of prepping the data for Association Rules Mining will be used to train the Naive Bayes models.
+
+A 10 fold holdout cross validation for each of the Naive Bayes models will be performed to evaluate the model's accuracy and precision.
+
+Create a function to perform holdout cross validation evaluations of Naive Bayes models.
+```{r echo=TRUE, warning=FALSE}
+# Create result bins for holdoutcv function
+AllResultest <- list()
+AllLabelstest <- list()
+
+NBholdoutcv <- function (data, N, kfolds) {
+  holdout <- split(sample(1:N),1:kfolds)
+  for (k in 1:kfolds) {
+  
+  test= data[holdout[[k]],]
+  train = data[-holdout[[k]],]
+
+# Make sure to remove Response from the testing data
+  test_response <- test$Response
+  test_no_response <- test[,-2]
+
+# {naivebayes} package
+  model <- naive_bayes(Response~., data = train, na.action = na.pass, 
+                                laplace = 1, adjust = 0)
+  predtest <- predict(model,test_no_response)
+  
+  # Accumulate results from each fold
+  AllResultest <- c(AllResultest, predtest)
+  AllLabelstest <- c(AllLabelstest, test_response)
+  ConfMatrix <- table(Actual = unlist(AllLabelstest), Prediction = unlist(AllResultest))}
+  return(ConfMatrix)
+}
+```
+
+Perform 10 fold cross validation Naive Bayes evaluation on each of the Offers 1, 2 and 3 recipients.
+```{r echo=TRUE, warning=FALSE}
+library(naivebayes)
+# Set up an experimental evaluation.
+# Number of observations
+N1 <- nrow(Offer1)
+N2 <- nrow(Offer2)
+N3 <- nrow(Offer3)
+# Number of desired splits
+kfolds <- 10
+# Perform NB holdout cross validation using NBholdoutcv function
+set.seed(123)
+NBholdoutcv(Offer1, N1, kfolds)
+set.seed(123)
+NBholdoutcv(Offer2, N2, kfolds)
+set.seed(123)
+NBholdoutcv(Offer3, N3, kfolds)
+```
+
+Although the models holdout cross validation accuracies were all above 75%, precision on the "yes" response seemed inadequately low for all three models.
+
+Offer 1 model accuracy = 0.858 with yes precision = 0.585
+Offer 2 model accuracy = 0.760 with yes precision = 0.459
+Offer 3 model accuracy = 0.986 with yes precision = 0.647
+
+########################################################
+############### SUPPORT VECTOR MACHINE #################
+########################################################
+
+Prep the training and test data for SVM.
+```{r}
+# Prep data set for SVM analysis
+# Unlike Naive Bayes continuous data in SVM algorithm need not be Gaussian.
+autosvm <- auto[,c(2:6,8:15,17:24)]
+
+# Segregate the data sets by Renew.Offer.Type to predict each offer
+Offer_1 <- autosvm[autosvm$Renew.Offer.Type=="Offer1",]
+Offer_2 <- autosvm[autosvm$Renew.Offer.Type == "Offer2",]
+Offer_3 <- autosvm[autosvm$Renew.Offer.Type == "Offer3",]
+
+# Remove the Renew.Offer.Type variable from the data sets.
+Offer_1 <- Offer_1[,-17]
+Offer_2 <- Offer_2[,-17]
+Offer_3 <- Offer_3[,-17]
+```
+
+Create a function to perform holdout cross validation evaluations of SVM models.
+```{r echo=TRUE, warning=FALSE}
+library(e1071)
+# Create result bins for SVMholdoutcv function
+AllResultest <- list()
+AllLabelstest <- list()
+
+SVMholdoutcv <- function (data, N, kfolds) {
+  holdout <- split(sample(1:N),1:kfolds)
+  for (k in 1:kfolds) {
+  
+  train= data[holdout[[k]],]
+  test = data[-holdout[[k]],]
+  test_response <- test$Response
+
+# {e1071} package
+  model <- svm(Response~., data = train, kernel = "linear")
+  predtest <- predict(model,newdata = test, type=c("class"))
+  
+  # Accumulate results from each fold
+  AllResultest <- c(AllResultest, predtest)
+  AllLabelstest <- c(AllLabelstest, test_response)
+  ConfMatrix <- table(Actual = unlist(AllLabelstest), Prediction = unlist(AllResultest))}
+  return(ConfMatrix)
+}
+```
+
+Perform 10 fold holdout cross validation SVM evaluation on Offer 1, 2, and 3 recipients.
+```{r echo=TRUE, warning=FALSE}
+# Set up an experimental evaluation.
+# Number of observations
+N1 <- nrow(Offer_1)
+N2 <- nrow(Offer_2)
+N3 <- nrow(Offer_3)
+# Number of desired splits
+kfolds <- 10
+# Perform NB holdout cross validation using NBholdoutcv function
+set.seed(123)
+SVMholdoutcv(Offer_1, N1, kfolds)
+set.seed(123)
+SVMholdoutcv(Offer_2, N2, kfolds)
+set.seed(123)
+SVMholdoutcv(Offer_3, N3, kfolds)
+```
+Although the SVM models' holdout cross validation accuracies were all above 75%, precision on the "yes" response for Offers 2 & 3 were low (< 50%).  Note: 1 = No and 2 = Yes in the confusion matrix results.
+
+Offer 1 model accuracy = 0.870 with yes precision = 0.809
+Offer 2 model accuracy = 0.758 with yes precision = 0.444
+Offer 3 model accuracy = 0.973 with yes precision = 0.338
+
+######################################################
+################# RANDOM FOREST ######################
+######################################################
+
+Use {caret} package to run a cross validation on random forest train data to find best model.
+```{r}
+library(caret)
+# Create train and test data sets using 80/20 split
+set.seed(49)
+sample_1 <- createDataPartition(Offer_1$Response, p=0.80, list = FALSE)
+train_1 <- Offer_1[sample_1,]
+test_1 <- Offer_1[-sample_1,]
+
+set.seed(49)
+sample_2 <- createDataPartition(Offer_2$Response, p=0.80, list = FALSE)
+train_2 <- Offer_2[sample_2,]
+test_2 <- Offer_2[-sample_2,]
+
+set.seed(49)
+sample_3 <- createDataPartition(Offer_3$Response, p=0.80, list = FALSE)
+train_3 <- Offer_3[sample_3,]
+test_3 <- Offer_3[-sample_3,]
+
+set.seed(123)
+RFmodel_1 <- train(Response~., data=train_1, method = "rf",
+                   trControl = trainControl("cv", number = 10),
+                   tuneLength = 10)
+
+set.seed(123)
+RFmodel_2 <- train(Response~., data=train_2, method = "rf",
+                   trControl = trainControl("cv", number = 10),
+                   tuneLength = 10)
+
+set.seed(123)
+RFmodel_3 <- train(Response~., data=train_3, method = "rf",
+                   trControl = trainControl("cv", number = 10),
+                   tuneLength = 10)
+
+RFmodel_1$finalModel
+RFmodel_2$finalModel
+RFmodel_3$finalModel
+```
+The Random Forest models' cross validation accuracies were all above 99%.  In addition the precision on the "yes" response were all above 95%.
+
+Offer 1 model accuracy = 0.995 with yes precision = 0.967
+Offer 2 model accuracy = 0.996 with yes precision = 0.986
+Offer 3 model accuracy = 1.000 with yes precision = 1.000
+
+The Random Forest models had the highest overall accuracy and the highest precision in correctly predicting a "yes" response. To test the models for over fitting the accuracies from the models results at predicting the train and test data will be compared. 
+```{r}
+# predict train and test using final models and compare accuracies.
+predtrain_1 <- predict(RFmodel_1, train_1, type = "prob")
+predtest_1 <- predict(RFmodel_1, test_1, type = "prob")
+resulttrain_1 <- ifelse(predtrain_1$Yes > 0.5,"Yes", "No")
+resulttest_1 <- ifelse(predtest_1$Yes > 0.5,"Yes", "No")
+table(Train1_Actual = train_1$Response, Prediction = resulttrain_1)
+table(Test1_Actual = test_1$Response, Prediction = resulttest_1)
+
+predtrain_2 <- predict(RFmodel_2, train_2, type = "prob")
+predtest_2 <- predict(RFmodel_2, test_2, type = "prob")
+resulttrain_2 <- ifelse(predtrain_2$Yes > 0.5,"Yes", "No")
+resulttest_2 <- ifelse(predtest_2$Yes > 0.5,"Yes", "No")
+table(Train2_Actual = train_2$Response, Prediction = resulttrain_2)
+table(Test2_Actual = test_2$Response, Prediction = resulttest_2)
+
+predtrain_3 <- predict(RFmodel_3, train_3, type = "prob")
+predtest_3 <- predict(RFmodel_3, test_3, type = "prob")
+resulttrain_3 <- ifelse(predtrain_3$Yes > 0.5,"Yes", "No")
+resulttest_3 <- ifelse(predtest_3$Yes > 0.5,"Yes", "No")
+table(Train3_Actual = train_3$Response, Prediction = resulttrain_3)
+table(Test3_Actual = test_3$Response, Prediction = resulttest_3)
+```
+All the models had 100% accuracy predictions on the train data. Model for Offer 1 had a 97.5% accuracy on the its test data while models for Offer 2 and 3 had 100% accuracy on their test data.  The results indicate very low likelihood of over fitting with extremely very high accuracy at predicting unknown data.  With the highest accuracy results of all the algorithms and low likelihood of over fitting, the random forest models will be used to predict responses on customers who declined their original renew offer types to determine the best alternative offer upon redistribution.
+
+Extract all customers with "No" responses to their renew offer types and use each random forest Offer model to predict probability of "Yes" response to alternate offer.
+```{r include=FALSE}
+library(dplyr)
+# Extract "No" responses into new data set
+OfferRespNo <- auto[auto$Response == "No",]
+# Extract the variables used in the train data of random forest models less Response
+autoRespNo <- OfferRespNo[,c(2,3,5,6,8:15,17:19,21:24)]
+
+# Predict probabilities of No and Yes responses based on random forest models
+RFpredict1 <- predict(RFmodel_1, autoRespNo, type = "prob")
+RFpredict2 <- predict(RFmodel_2, autoRespNo, type = "prob")
+RFpredict3 <- predict(RFmodel_3, autoRespNo, type = "prob")
+
+# Add "Yes" probabilities to OfferRespNo and compare results for best "Yes" outcomes.
+OfferRespNo$Offer1_Yes <- RFpredict1$Yes
+OfferRespNo$Offer2_Yes <- RFpredict2$Yes
+OfferRespNo$Offer3_Yes <- RFpredict3$Yes
+
+# Determine best alternative offer to distribute based on highest "Yes" probability
+OfferRespNo$BestOffer <- ifelse(OfferRespNo$Renew.Offer.Type == "Offer4",
+                                ifelse(OfferRespNo$Offer1_Yes > OfferRespNo$Offer2_Yes, 
+                                ifelse(OfferRespNo$Offer1_Yes > OfferRespNo$Offer3_Yes,
+                                        "Offer1",
+                                ifelse(OfferRespNo$Offer3_Yes > OfferRespNo$Offer2_Yes,
+                                       "Offer3","Offer2")),
+                                ifelse(OfferRespNo$Offer2_Yes > OfferRespNo$Offer3_Yes, 
+                                       "Offer2", "Offer3")),
+                         ifelse(OfferRespNo$Renew.Offer.Type == "Offer1",
+                         ifelse(OfferRespNo$Offer2_Yes > OfferRespNo$Offer3_Yes, 
+                                "Offer2", "Offer3"),
+                         ifelse(OfferRespNo$Renew.Offer.Type == "Offer2",
+                         ifelse(OfferRespNo$Offer1_Yes > OfferRespNo$Offer3_Yes,
+                                "Offer1", "Offer3"),
+                         ifelse(OfferRespNo$Offer1_Yes > OfferRespNo$Offer2_Yes, 
+                                "Offer1", "Offer2"))))
+
+# Record probability of "Yes" for Best Offer
+OfferRespNo$OfferProbability <- ifelse(OfferRespNo$Renew.Offer.Type == "Offer4",
+                                ifelse(OfferRespNo$Offer1_Yes > OfferRespNo$Offer2_Yes, 
+                                ifelse(OfferRespNo$Offer1_Yes > OfferRespNo$Offer3_Yes,
+                                        OfferRespNo$Offer1_Yes,
+                                ifelse(OfferRespNo$Offer3_Yes > OfferRespNo$Offer2_Yes,
+                                       OfferRespNo$Offer3_Yes, OfferRespNo$Offer2_Yes)),
+                                ifelse(OfferRespNo$Offer2_Yes > OfferRespNo$Offer3_Yes, 
+                                       OfferRespNo$Offer2_Yes, OfferRespNo$Offer3_Yes)),
+                                ifelse(OfferRespNo$Renew.Offer.Type == "Offer1",
+                         ifelse(OfferRespNo$Offer2_Yes > OfferRespNo$Offer3_Yes, 
+                                OfferRespNo$Offer2_Yes, OfferRespNo$Offer3_Yes),
+                         ifelse(OfferRespNo$Renew.Offer.Type == "Offer2",
+                         ifelse(OfferRespNo$Offer1_Yes > OfferRespNo$Offer3_Yes,
+                                OfferRespNo$Offer1_Yes, OfferRespNo$Offer3_Yes),
+                         ifelse(OfferRespNo$Offer1_Yes > OfferRespNo$Offer2_Yes, 
+                                OfferRespNo$Offer1_Yes, OfferRespNo$Offer2_Yes))))
+
+# Provide discretized probability of "Yes" Response to Best Offer
+OfferRespNo$YesChance <- ifelse(OfferRespNo$OfferProbability < 0.25, "< 25% Chance",
+                             ifelse(between(OfferRespNo$OfferProbability,0.25,0.5), 
+                                    "25%-49% Chance",
+                              ifelse(OfferRespNo$OfferProbability > 0.75, "> 75% Chance",
+                                     "50%-75% Chance")))
+```
+
+Print 10 sample rows illustrating the probability process of determining best offer.
+```{r}
+head(OfferRespNo[order(-OfferRespNo$OfferProbability),c(20,32:35)],10)
+```
+As illustrated in the printout above the Best Offer to be redistributed to the customer was determined by the model with the highest probability for a "Yes" response.   The Renew.Offer.Type column represents the original offer the customer declined.  The Offer1_Yes, Offer2_Yes and Offer3_Yes columns represent each model's prediction of a yes response by probability. BestOffer column represents the Offer with the highest probability for renewal.
+
+Use Shirin Elsinghorst's function to plot a sample random forest tree with least and most nodes. 
+```{r include=FALSE}
+library(dplyr)
+library(ggraph)
+library(igraph)
+
+# This is a function shared by Shirin Elsinghorst in her post 
+# "Plotting trees from Random Forest models with ggraph"
+# (https://shiring.github.io/machine_learning/2017/03/16/rf_plot_ggraph)
+
+tree_func <- function(final_model, 
+                      tree_num) {
+  
+  # get tree by index
+  tree <- randomForest::getTree(final_model, 
+                                k = tree_num, 
+                                labelVar = TRUE) %>%
+    tibble::rownames_to_column() %>%
+    # make leaf split points to NA, so the 0s won't get plotted
+    mutate(`split point` = ifelse(is.na(prediction), `split point`, NA))
+  
+  # prepare data frame for graph
+  graph_frame <- data.frame(from = rep(tree$rowname, 2),
+                            to = c(tree$`left daughter`, tree$`right daughter`))
+  
+  # convert to graph and delete the last node that we don't want to plot
+  graph <- graph_from_data_frame(graph_frame) %>%
+    delete_vertices("0")
+  
+  # set node labels
+  V(graph)$node_label <- gsub("_", " ", as.character(tree$`split var`))
+  V(graph)$leaf_label <- as.character(tree$prediction)
+  V(graph)$split <- as.character(round(tree$`split point`, digits = 2))
+  
+  # plot
+  plot <- ggraph(graph, 'dendrogram') + 
+    theme_bw() +
+    geom_edge_link() +
+    geom_node_point() +
+    geom_node_text(aes(label = node_label), na.rm = TRUE, repel = TRUE) +
+    geom_node_label(aes(label = split), vjust = 2.5, na.rm = TRUE, fill = "white") +
+    geom_node_label(aes(label = leaf_label, fill = leaf_label), na.rm = TRUE, 
+					repel = TRUE, colour = "white", fontface = "bold", show.legend = FALSE) +
+    theme(panel.grid.minor = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.background = element_blank(),
+          plot.background = element_rect(fill = "white"),
+          panel.border = element_blank(),
+          axis.line = element_blank(),
+          axis.text.x = element_blank(),
+          axis.text.y = element_blank(),
+          axis.ticks = element_blank(),
+          axis.title.x = element_blank(),
+          axis.title.y = element_blank(),
+          plot.title = element_text(size = 18))
+  
+  print(plot)
+}
+```
+
+Create the objects for the random forest tree samples using the Offer 3 model
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+tree_min <- which(RFmodel_3$finalModel$forest$ndbigtree == max(RFmodel_3$finalModel$forest$ndbigtree))
+tree_max <- which(RFmodel_3$finalModel$forest$ndbigtree == max(RFmodel_3$finalModel$forest$ndbigtree))
+```
+
+Plot the Offer 3 random forest model 'tree' with the least number of nodes. 
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+t1 <- tree_func(final_model = RFmodel_3$finalModel, tree_min)
+```
+
+Plot the Offer 3 random forest model 'tree' with the most number of nodes
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+t2 <- tree_func(final_model = RFmodel_3$finalModel, tree_max)
+```
+
+Graph the model results on how the offers will be redistributed based on the best alternative offer. In addition graph the model results on the probability the renew offers would be accepted.
+```{r}
+library(ggplot2)
+
+OfferRespNo$YesChance <- factor(OfferRespNo$YesChance, levels = c("< 25% Chance","25%-49% Chance",
+                                                                  "50%-75% Chance","> 75% Chance"))
+
+ggplot(OfferRespNo, aes(x=Renew.Offer.Type, fill = BestOffer)) + geom_bar()+
+  scale_fill_brewer(palette = "Dark2", name = "Best Offer") + labs(x="Original Offer Declined")+
+  ggtitle("Recommended Redistribution by Best Offer") +
+  scale_x_discrete(breaks=c("Offer1", "Offer2","Offer3","Offer4"),
+                   labels = c("Declined Offer 1", "Declined Offer 2",
+                   "Declined Offer 3", "Declined Offer 4"))
+
+ggplot(OfferRespNo, aes(x=YesChance, fill = BestOffer)) + geom_bar() +
+  scale_fill_brewer(palette = "Dark2", name = "Best Offer") + labs(x= "Probability of a Yes Response")+
+  ggtitle("Recommended Redistribution of Best Offer by Probability of a Yes Conversion")
+```
+
+Table of Best Offer distribution by probability the offer will be accepted.
+```{r}
+table(Best_Offer = OfferRespNo$BestOffer,Probability_Offer_Accepted = OfferRespNo$YesChance)
+```
+As illustrated in the table above, only 40 customers have a > 50% probability of renewing the alternative offer. Although the models had high accuracy and precision, the results predicted a low conversion rate upon redistribution of offers. 
+
+Given the poor performance of the renew offer types overall, a reexamination on the renew offer design may be needed to create offers that will achieve higher conversions.  To aid in this process cluster analysis can be used to find distinct customer segments.  The characteristics that make up the customer segments can provide insights and guidance to design renewal offers to make them more attractive to the target customers by segment. 
+
+
+###########################################################
+##################### CLUSTER ANALYSIS ####################
+###########################################################
+
+Libraries for cluster analysis
+```{r cluster, include=FALSE}
+# Libraries
+require(tidyverse)
+require(factoextra)
+require(cluster)
+require(gridExtra)
+require(dplyr)
+require(plyr)
+require(VIM)
+require(lubridate)
+require(DT)
+library(arules)
+```
+
+Prep a data to be used for cluster analysis.  Variables to be included in the analysis: Gender, Income, Education, Marital Status, Employment Status, State, Region, Vehicle Size, Vehicle Class, Policy Type, Coverage, Sales Channel, Months Since Policy Inception, Monthly Premium, Months Since Last Claim, Total Claim Amount, Number of Open Complaints, Number of Policies and Customer Lifetime Value.
+```{r}
+# move all continuous data into autoclust1
+autoclust1 <- auto[,c(3,10,13,14,15,16,17,22)]
+# transform nominal customer profile variables into ordinal
+autoclust2 <- data.frame(Education = ifelse(auto$Education == "High School or Below", 1,
+                                     ifelse(auto$Education == "College", 2,
+                                     ifelse(auto$Education == "Bachelor", 3,
+                                     ifelse(auto$Education == "Master",4, 5)))))
+autoclust2$Gender <- ifelse(auto$Gender == "F", 0, 1)
+autoclust2$MaritalStatus <- ifelse(auto$Marital.Status == "Divorced", 0,
+                            ifelse(auto$Marital.Status == "Single",1, 2))
+autoclust2$EmployStatus <- ifelse(auto$EmploymentStatus == "Unemployed", 0,
+                           ifelse(auto$EmploymentStatus == "Employed",1,
+                           ifelse(auto$EmploymentStatus == "Retired", 2,
+                           ifelse(auto$EmploymentStatus == "Disabled", 3, 4))))
+autoclust2$State <- ifelse(auto$State == "Arizona", 0,
+                    ifelse(auto$State == "California", 1,
+                    ifelse(auto$State == "Nevada", 2,
+                    ifelse(auto$State == "Oregon", 3, 4))))
+autoclust2$Region <- ifelse(auto$Location.Code == "Rural", 0,
+                     ifelse(auto$Location.Code == "Suburban", 1, 2))
+# transform nominal policy profile variables into ordinal
+autoclust3 <- data.frame(PolicyType = ifelse(auto$Policy.Type == "Corporate Auto",0,
+                         ifelse(auto$Policy.Type == "Personal Auto",1, 2)))
+autoclust3$VehicleSize <- ifelse(auto$Vehicle.Size == "Large", 2,
+                          ifelse(auto$Vehicle.Size == "Medsize", 1,0))
+autoclust3$VehicleClass <-ifelse(auto$Vehicle.Class == "Four-Door Car", 0,
+                          ifelse(auto$Vehicle.Class == "Luxury Car", 1,
+                          ifelse(auto$Vehicle.Class == "Luxury SUV", 2,
+                          ifelse(auto$Vehicle.Class == "Sports Car", 3,
+                          ifelse(auto$Vehicle.Class == "Two-Door Car", 4,5)))))
+autoclust3$Coverage <- ifelse(auto$Coverage == "Basic", 0,
+                       ifelse(auto$Coverage == "Extended", 1, 2))
+autoclust3$SChannel <- ifelse(auto$Sales.Channel == "Agent", 0,
+                         ifelse(auto$Sales.Channel == "Branch", 1,
+                         ifelse(auto$Sales.Channel == "Call Center", 2, 3)))
+autoclust3$Response <- ifelse(auto$Response == "Yes", 1, 0)
+autoclust3$RenewOffer <- ifelse(auto$Renew.Offer.Type == "Offer1", 1,
+                         ifelse(auto$Renew.Offer.Type == "Offer2", 2,
+                         ifelse(auto$Renew.Offer.Type == "Offer3", 3, 4)))
+
+autoclust <- data.frame(autoclust1, autoclust2, autoclust3)
+```
+
+Use elbow method to determine optimal number of clusters by using the Total Within Sum Squares (wss) to the Number of Clusters.
+```{r}
+# Determine optimal number of clusters using elbow method
+fviz_nbclust(autoclust, kmeans, method = "wss") + 
+  geom_vline(xintercept = 3, linetype = 2)
+```
+The wss to number clusters chart suggests the optimal number of clusters to be 3. 
+
+Run the kmeans algorithm with k= 3 clusters.  Plot a 2 dimensional visualization of the resulting clusters.
+```{r}
+# Run cluster analysis with k= 3 clusters
+set.seed(123)
+k3 <- kmeans(autoclust, centers = 3, nstart = 25)
+# Plot a 2 dimensional representation of the resulting clusters
+p3 <- fviz_cluster(k3, geom = "point", data = autoclust) + ggtitle("Kmeans 3 Customer Clusters")
+p3
+```
+
+Explore each cluster's variables to determine the distinctive differences between the 3 clusters.
+```{r}
+# Combine auto and cluster results into a data frame for EDA
+aCluster <- auto
+aCluster$Clustk3 <- k3$cluster
+
+MyTheme <- theme(axis.text = element_text(size = 18), 
+          axis.title = element_text(size = 20, face ="bold"), 
+          plot.title = element_text(size = 24, face = "bold"),
+          legend.text = element_text(size = 22),
+          legend.title = element_text(size = 22))
+
+Xlabels <- scale_x_discrete(breaks=c("1", "2","3"),
+                   labels = str_wrap( c("Leisure Working-Class Provincials",
+                          "Affluent Cautiously Vigilant Drivers",
+                          "Single Out-of-Action Suburban Mavericks"), width = 20))
+
+aCluster$EmploymentStatus <- factor(aCluster$EmploymentStatus, 
+                                    levels = c("Employed","Medical Leave",
+                                                          "Disabled","Retired","Unemployed"))
+
+ggplot(aCluster,aes(x=as.factor(Clustk3), fill = EmploymentStatus )) + geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) + 
+  labs(x="Customer Segments", y= "percent", fill = "Employment Status") +
+  ggtitle("Customer Segments by Employment Status") + scale_fill_brewer(palette = "YlOrBr") +
+  Xlabels + MyTheme
+
+ggplot(aCluster,aes( x=as.factor(Clustk3), fill = Location.Code)) + geom_bar(position = "fill")  +
+  scale_y_continuous(labels = scales::percent) + 
+  labs(x="Customer Segments", y= "percent", fill = " Location") +
+  ggtitle("Customer Segments by Location") + scale_fill_brewer(palette = "Oranges")+
+  Xlabels + MyTheme
+
+aCluster$Marital.Status <- factor(aCluster$Marital.Status, 
+                                    levels = c("Single","Married", "Divorced"))
+
+ggplot(aCluster,aes( x=as.factor(Clustk3), fill = Marital.Status)) + geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) + 
+  labs(x="Customer Segments", y= "percent", fill = "Marital Status") +
+  ggtitle("Customer Segments by Marital Status") + scale_fill_brewer(palette = "YlOrRd")+
+   Xlabels + MyTheme
+
+ggplot(aCluster,aes(x=as.factor(Clustk3), fill = IncomeBin)) + geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) + 
+  labs(x="Customer Segments", y= "percent", fill = "Annual Income") +
+  ggtitle("Customer Segments by Annual Income") + scale_fill_brewer(palette = "YlOrBr")+
+   Xlabels + MyTheme
+
+aCluster$ClaimBin <- factor(aCluster$ClaimBin, levels = c("< $250","$250-$499",
+                                                          "$500-$749","$750-$999","$1000+"))
+
+ggplot(aCluster,aes(x=as.factor(Clustk3), fill = ClaimBin)) + geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) + 
+  labs(x="Customer Segments", y= "percent", fill = "Total Claim Amount") +
+  ggtitle("Customer Segments by Total Claim Amount") + scale_fill_brewer(palette = "YlOrRd")+
+   Xlabels + MyTheme
+```
+Five key characteristics distinctly defined each customer segment: Employment Status, Location, Marital Status, Annual Income and Total Claim Amount. Below is a summary description of each segment based on the results seen in the graphs above.
+
+CLUSTER 1: 
+LEISURE WORKING-CLASS PROVINCIALS
+Disabled, Medical Leave, Retired, Employed
+Mostly Suburban
+Income 15k-60k
+
+CLUSTER 2: 
+AFFLUENT CAUTIOUSLY VIGILANT DRIVERS
+Employed
+Income: $45k or more
+Low Accident Claims
+
+CLUSTER 3: 
+SINGLE OUT-OF-ACTION SUBURBAN MAVERICKS
+Unemployed, Disabled, Medical Leave, Retired
+Single
+Suburban
+Income: < $30k
+High Accident Claims
+
+In addition to providing customer segment insights to aid in designing improved renewal offers, a decision tree model can also be employed to assess the probable customer lifetime value (CLV) of prospective clients. 
+
+####################################################
+############      DECISION TREE      ###############
+####################################################
+
+Load libraries
+```{r include=FALSE}
+# Libraries
+library(tidyverse)
+library(caret)
+library(purrr)
+library(rpart)
+library(dplyr)
+library(rattle)
+```
+
+As a client prospect tool, only variables likely to be known about customers at time of on-boarding will be included in the model. The response variable will be CLV_Levels: Low_CLV (< 5000), Avg_CLV (5000 to 8000), High_CLV (8001 to 15000) and Super_CLV (> 15000).  The predictor variables are: State, Coverage, Education, Employment Status, Gender, Income, Location Code, Marital Status, Monthly Premium Auto, Policy Type, Number of Policies, Policy, Sales Channel, Vehicle Class and Vehicle Size. 
+
+Prep the data for use with rpart decision tree algorithm.  Create a train and test set using an 80/20 split.
+```{r}
+# create data frame with the predictor and response variables
+autoDT <- auto[,c(2,5,6,8,9,10,11,12,13,17,18,19,21,23,24,29)]
+
+# autoDT 80/20 split train and test 
+set.seed(123)
+sample8020 <- createDataPartition(autoDT$CLV_Levels, p=0.80,list = FALSE)
+DTtrain8020 <- autoDT[sample8020,]
+DTtest8020 <- autoDT[-sample8020,]
+```
+
+Utilize caret package to run a 15 fold cross validation on the train data to assess model's accuracy and to find best complexity parameter (cp) value for pruning.  Plot the cross validation results by accuracy and complexity parameter.  Print cross validation results.
+```{r}
+# Fit the model on the training sets
+set.seed(123)
+DTmodel8020 <- train(CLV_Levels~., data = DTtrain8020 , method = "rpart",
+                trControl = trainControl("cv", number = 15),
+                tuneLength = 15)
+
+# Plot model accuracy vs different values of cp
+plot(DTmodel8020, main = "DECISION TREE CLV MODEL")
+
+# compare accuracies between the three models
+DTmodel8020
+
+```
+Best accuracy for the model was 87.1% with cp = 0.001984.
+
+```{r}
+confusionMatrix(DTmodel8020)
+```
+
+Run the model against the test data to assess accuracy and possibility of over fitting.
+```{r}
+# Model prediction on test
+set.seed(123)
+DTpredict8020 <- predict(DTmodel8020,DTtest8020)
+
+# Confusion Matrix on results
+table(Actual = DTtest8020$CLV_Levels, Predict = DTpredict8020 )
+
+```
+The best fit model had an 85.7% accuracy at predicting the test data. The model's performance on the test data was only 1.4% less accurate the the cross validation results on the train data.  The low difference in accuracy suggests low likelihood of over fitting.  The precision values for each of the 4 levels predicted were all above 74%. 
+
+Model results on test data: accuracy = 0.866, precisions: Low_CLV = 0.959, Avg_CLV = 0.870, High_CLV = 0.741, Super_CLV = 0.821  
+
+A model trained on the full data set will be used as the final model. 
+
+Create final model to be trained on the full dataset and plot the decision tree model
+```{r}
+# Train the model on the entire dataset for a final model.
+set.seed(123)
+CLV_model <- rpart(CLV_Levels~.,data = autoDT, method = "class")
+
+# Plot the model
+fancyRpartPlot(CLV_model, main = "Customer Lifetime Value Model")
+```
+
+
+
+
+
+
+
+
+
+
